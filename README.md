@@ -58,5 +58,5 @@ This project is inspired by real-world **SaaS backend architectures** and focuse
 
 ### 1️⃣ Clone Repository
 ```bash
-git clone https://github.com/<your-username>/secure-multi-tenant-platform.git
+git clone https://github.com/Arya-9989/secure-multi-tenant-platform.git
 cd secure-multi-tenant-platform
