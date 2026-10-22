@@ -203,9 +203,9 @@ SPECTACULAR_SETTINGS = {
     "SWAGGER_UI_FAVICON_HREF": "SIDECAR",
     "REDOC_DIST": "SIDECAR",
     "SWAGGER_UI_SETTINGS": {
-        # Deep links render an <a> inside each operation's toggle <button>,
-        # which nests interactive controls (axe: nested-interactive).
-        "deepLinking": False,
+        # The open operation is mirrored in the URL. apps/web/static/web/js/
+        # swagger-plugins.js keeps that accessible (no link nested in a button).
+        "deepLinking": True,
         "persistAuthorization": True,
         "displayRequestDuration": True,
         "filter": True,

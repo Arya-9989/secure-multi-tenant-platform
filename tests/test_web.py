@@ -6,9 +6,10 @@ import re
 from collections import Counter
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
+from django.conf import settings
 from django.test import Client, RequestFactory
 from rest_framework.test import APIClient
 
@@ -101,6 +102,19 @@ def test_swagger_init_script_is_served_separately(api_client: APIClient) -> None
     assert script.status_code == 200
     assert script["Content-Type"].startswith("application/javascript")
     assert "SwaggerUIBundle(" in script.content.decode()
+
+
+@pytest.mark.django_db
+def test_swagger_keeps_deep_links_with_the_accessibility_plugin(api_client: APIClient) -> None:
+    spectacular = cast(dict[str, Any], settings.SPECTACULAR_SETTINGS)
+    assert spectacular["SWAGGER_UI_SETTINGS"]["deepLinking"] is True
+    page = api_client.get("/api/docs/").content.decode()
+    scripts = re.findall(r'<script src="([^"]+)"', page)
+    # The plugin wraps SwaggerUIBundle, so it must load after it and before the init script.
+    bundle = next(i for i, src in enumerate(scripts) if "swagger-ui-bundle" in src)
+    plugin = scripts.index("/static/web/js/swagger-plugins.js")
+    init = next(i for i, src in enumerate(scripts) if "script" in src.split("?", 1)[-1])
+    assert bundle < plugin < init
 
 
 # ---------------------------------------------------------------- error pages

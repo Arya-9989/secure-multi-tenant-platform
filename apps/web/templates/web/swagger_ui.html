@@ -22,7 +22,9 @@
   </div>
   <noscript><p class="docs-noscript">Swagger UI needs JavaScript. The raw schema is at <a href="{% url 'schema' %}">{% url 'schema' %}</a>.</p></noscript>
 </div>
-<script src="{{ swagger_ui_bundle }}"></script>
-<script src="{{ script_url }}"></script>
+{# Deferred, in order: the skeleton paints while the 1.5 MB bundle downloads. #}
+<script src="{{ swagger_ui_bundle }}" defer></script>
+<script src="{% static 'web/js/swagger-plugins.js' %}" defer></script>
+<script src="{{ script_url }}" defer></script>
 </body>
 </html>
