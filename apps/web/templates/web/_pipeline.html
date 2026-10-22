@@ -1,0 +1,141 @@
+{# The request path through the app, drawn for both themes with CSS custom properties. #}
+<figure class="diagram">
+  <svg class="diagram-wide" viewBox="0 0 1256 330" role="img" aria-labelledby="pipe-title pipe-desc" xmlns="http://www.w3.org/2000/svg">
+    <title id="pipe-title">Request path through the platform</title>
+    <desc id="pipe-desc">A request passes five stages in order: request context, authentication by TenantJWTAuthentication, role authorization by HasRolePermission, row scoping by visible_to(user), and the service layer with audit.record(), which writes to PostgreSQL. Authentication failures return 401, missing permissions return 403, and rows from another tenant return 404, the same as a random ID.</desc>
+
+    <rect class="d-entry" x="0" y="78" width="80" height="40" rx="20"/>
+    <text class="d-entry-text" x="40" y="103" text-anchor="middle">Request</text>
+    <path class="d-flow" d="M80 98H97"/><path class="d-arrow" d="M104 98l-7.5-4.5v9z"/>
+
+    <g>
+      <rect class="d-node" x="104" y="30" width="212" height="136" rx="20"/>
+      <text class="d-step" x="124" y="58">01</text>
+      <text class="d-title" x="124" y="82">Context</text>
+      <text class="d-code" x="124" y="106">RequestContextMiddleware</text>
+      <text class="d-text" x="124" y="130">Request ID and client IP</text>
+      <text class="d-text" x="124" y="148">One access-log line</text>
+    </g>
+    <path class="d-flow" d="M316 98H331"/><path class="d-arrow" d="M338 98l-7.5-4.5v9z"/>
+    <g>
+      <rect class="d-node" x="338" y="30" width="212" height="136" rx="20"/>
+      <text class="d-step" x="358" y="58">02</text>
+      <text class="d-title" x="358" y="82">Authenticate</text>
+      <text class="d-code" x="358" y="106">TenantJWTAuthentication</text>
+      <text class="d-text" x="358" y="130">Signature, audience, issuer</text>
+      <text class="d-text" x="358" y="148">token_version, user active</text>
+    </g>
+    <path class="d-flow" d="M550 98H565"/><path class="d-arrow" d="M572 98l-7.5-4.5v9z"/>
+    <g>
+      <rect class="d-node" x="572" y="30" width="212" height="136" rx="20"/>
+      <text class="d-step" x="592" y="58">03</text>
+      <text class="d-title" x="592" y="82">Authorize</text>
+      <text class="d-code" x="592" y="106">HasRolePermission</text>
+      <text class="d-text" x="592" y="130">Role-to-permission matrix</text>
+      <text class="d-text" x="592" y="148">Undeclared action: denied</text>
+    </g>
+    <path class="d-flow" d="M784 98H799"/><path class="d-arrow" d="M806 98l-7.5-4.5v9z"/>
+    <g>
+      <rect class="d-node-key" x="806" y="30" width="212" height="136" rx="20"/>
+      <text class="d-step" x="826" y="58">04</text>
+      <text class="d-title" x="826" y="82">Scope rows</text>
+      <text class="d-code" x="826" y="106">visible_to(user)</text>
+      <text class="d-text" x="826" y="130">Foreign rows are absent</text>
+      <text class="d-text" x="826" y="148">Object guard as backstop</text>
+    </g>
+    <path class="d-flow" d="M1018 98H1033"/><path class="d-arrow" d="M1040 98l-7.5-4.5v9z"/>
+    <g>
+      <rect class="d-node" x="1040" y="30" width="212" height="136" rx="20"/>
+      <text class="d-step" x="1060" y="58">05</text>
+      <text class="d-title" x="1060" y="82">Act and audit</text>
+      <text class="d-code" x="1060" y="106">audit.record()</text>
+      <text class="d-text" x="1060" y="130">Service re-checks tenant</text>
+      <text class="d-text" x="1060" y="148">Same transaction as change</text>
+    </g>
+
+    <path class="d-reject" d="M444 166V218"/><path class="d-arrow-muted" d="M444 226l-4.5-7.5h9z"/>
+    <rect class="d-pill" x="354" y="226" width="180" height="56" rx="28"/>
+    <text class="d-pill-text" x="444" y="250" text-anchor="middle">401</text>
+    <text class="d-pill-sub" x="444" y="268" text-anchor="middle">Invalid or revoked token</text>
+
+    <path class="d-reject" d="M678 166V218"/><path class="d-arrow-muted" d="M678 226l-4.5-7.5h9z"/>
+    <rect class="d-pill" x="588" y="226" width="180" height="56" rx="28"/>
+    <text class="d-pill-text" x="678" y="250" text-anchor="middle">403</text>
+    <text class="d-pill-sub" x="678" y="268" text-anchor="middle">Role lacks the permission</text>
+
+    <path class="d-reject" d="M912 166V218"/><path class="d-arrow-muted" d="M912 226l-4.5-7.5h9z"/>
+    <rect class="d-pill" x="822" y="226" width="180" height="56" rx="28"/>
+    <text class="d-pill-text" x="912" y="250" text-anchor="middle">404</text>
+    <text class="d-pill-sub" x="912" y="268" text-anchor="middle">Same as a random ID</text>
+
+    <path class="d-flow" d="M1146 166V218"/><path class="d-arrow" d="M1146 226l-4.5-7.5h9z"/>
+    <rect class="d-db" x="1040" y="226" width="212" height="100" rx="18"/>
+    <text class="d-title" x="1060" y="256">PostgreSQL</text>
+    <text class="d-text" x="1060" y="282">Check constraints</text>
+    <text class="d-text" x="1060" y="302">Append-only audit trigger</text>
+  </svg>
+
+  <svg class="diagram-tall" viewBox="0 0 360 920" role="img" aria-labelledby="pipe-title-m pipe-desc-m" xmlns="http://www.w3.org/2000/svg">
+    <title id="pipe-title-m">Request path through the platform</title>
+    <desc id="pipe-desc-m">A request passes five stages in order: request context, authentication, role authorization, row scoping and the service layer with the audit log, which writes to PostgreSQL. Stages two to four reject with 401, 403 and 404.</desc>
+
+    <rect class="d-entry" x="78" y="0" width="80" height="36" rx="18"/>
+    <text class="d-entry-text" x="118" y="23" text-anchor="middle">Request</text>
+    <path class="d-flow" d="M118 36V45"/><path class="d-arrow" d="M118 52l-4.5-7.5h9z"/>
+
+    <rect class="d-node" x="0" y="52" width="236" height="120" rx="20"/>
+    <text class="d-step" x="18" y="78">01</text><text class="d-title" x="46" y="78">Context</text>
+    <text class="d-code" x="18" y="104">RequestContextMiddleware</text>
+    <text class="d-text" x="18" y="126">Request ID and client IP</text>
+    <text class="d-text" x="18" y="144">One access-log line</text>
+    <path class="d-flow" d="M118 172V201"/><path class="d-arrow" d="M118 208l-4.5-7.5h9z"/>
+
+    <rect class="d-node" x="0" y="208" width="236" height="120" rx="20"/>
+    <text class="d-step" x="18" y="234">02</text><text class="d-title" x="46" y="234">Authenticate</text>
+    <text class="d-code" x="18" y="260">TenantJWTAuthentication</text>
+    <text class="d-text" x="18" y="282">Signature, audience, issuer</text>
+    <text class="d-text" x="18" y="300">token_version, user active</text>
+    <path class="d-flow" d="M118 328V357"/><path class="d-arrow" d="M118 364l-4.5-7.5h9z"/>
+
+    <rect class="d-node" x="0" y="364" width="236" height="120" rx="20"/>
+    <text class="d-step" x="18" y="390">03</text><text class="d-title" x="46" y="390">Authorize</text>
+    <text class="d-code" x="18" y="416">HasRolePermission</text>
+    <text class="d-text" x="18" y="438">Role-to-permission matrix</text>
+    <text class="d-text" x="18" y="456">Undeclared action: denied</text>
+    <path class="d-flow" d="M118 484V513"/><path class="d-arrow" d="M118 520l-4.5-7.5h9z"/>
+
+    <rect class="d-node-key" x="0" y="520" width="236" height="120" rx="20"/>
+    <text class="d-step" x="18" y="546">04</text><text class="d-title" x="46" y="546">Scope rows</text>
+    <text class="d-code" x="18" y="572">visible_to(user)</text>
+    <text class="d-text" x="18" y="594">Foreign rows are absent</text>
+    <text class="d-text" x="18" y="612">Object guard as backstop</text>
+    <path class="d-flow" d="M118 640V669"/><path class="d-arrow" d="M118 676l-4.5-7.5h9z"/>
+
+    <rect class="d-node" x="0" y="676" width="236" height="120" rx="20"/>
+    <text class="d-step" x="18" y="702">05</text><text class="d-title" x="46" y="702">Act and audit</text>
+    <text class="d-code" x="18" y="728">audit.record()</text>
+    <text class="d-text" x="18" y="750">Service re-checks tenant</text>
+    <text class="d-text" x="18" y="768">Same transaction as change</text>
+    <path class="d-flow" d="M118 796V825"/><path class="d-arrow" d="M118 832l-4.5-7.5h9z"/>
+
+    <rect class="d-db" x="0" y="832" width="236" height="84" rx="18"/>
+    <text class="d-title" x="18" y="860">PostgreSQL</text>
+    <text class="d-text" x="18" y="882">Check constraints</text>
+    <text class="d-text" x="18" y="900">Append-only audit trigger</text>
+
+    <path class="d-reject" d="M236 268H255"/><path class="d-arrow-muted" d="M262 268l-7.5-4.5v9z"/>
+    <rect class="d-pill" x="262" y="240" width="98" height="56" rx="28"/>
+    <text class="d-pill-text" x="311" y="264" text-anchor="middle">401</text>
+    <text class="d-pill-sub" x="311" y="282" text-anchor="middle">Bad token</text>
+
+    <path class="d-reject" d="M236 424H255"/><path class="d-arrow-muted" d="M262 424l-7.5-4.5v9z"/>
+    <rect class="d-pill" x="262" y="396" width="98" height="56" rx="28"/>
+    <text class="d-pill-text" x="311" y="420" text-anchor="middle">403</text>
+    <text class="d-pill-sub" x="311" y="438" text-anchor="middle">No permission</text>
+
+    <path class="d-reject" d="M236 580H255"/><path class="d-arrow-muted" d="M262 580l-7.5-4.5v9z"/>
+    <rect class="d-pill" x="262" y="552" width="98" height="56" rx="28"/>
+    <text class="d-pill-text" x="311" y="576" text-anchor="middle">404</text>
+    <text class="d-pill-sub" x="311" y="594" text-anchor="middle">Not found</text>
+  </svg>
+</figure>

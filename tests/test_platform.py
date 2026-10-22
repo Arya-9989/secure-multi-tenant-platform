@@ -78,10 +78,10 @@ def test_docs_are_served(api_client: APIClient, url: str, marker: str) -> None:
 
 
 @pytest.mark.django_db
-def test_root_redirects_to_docs(api_client: APIClient) -> None:
+def test_root_serves_the_landing_page(api_client: APIClient) -> None:
     response = api_client.get("/")
-    assert response.status_code == 302
-    assert response["Location"] == "/api/docs/"
+    assert response.status_code == 200
+    assert 'href="/api/docs/"' in response.content.decode()
 
 
 # ---------------------------------------------------------------- request context

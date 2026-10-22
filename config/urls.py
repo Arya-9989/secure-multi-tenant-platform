@@ -1,7 +1,6 @@
 from django.conf import settings
 from django.contrib import admin
 from django.urls import URLPattern, URLResolver, include, path
-from django.views.generic import RedirectView
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 from rest_framework.routers import SimpleRouter
 
@@ -18,6 +17,7 @@ from apps.accounts.views.users import UserViewSet
 from apps.auditlogs.views import AuditLogViewSet
 from apps.common.views import LivenessView, ReadinessView
 from apps.organizations.views import OrganizationViewSet
+from apps.web.views import LandingView
 
 router = SimpleRouter()
 router.register("organizations", OrganizationViewSet, basename="organization")
@@ -37,6 +37,7 @@ api_v1: list[URLPattern | URLResolver] = [
 ]
 
 urlpatterns: list[URLPattern | URLResolver] = [
+    path("", LandingView.as_view(), name="landing"),
     path("api/v1/", include(api_v1)),
     path("health/live/", LivenessView.as_view(), name="health-live"),
     path("health/ready/", ReadinessView.as_view(), name="health-ready"),
@@ -48,7 +49,6 @@ if settings.API_DOCS_ENABLED:
         path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
         path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
         path("api/redoc/", SpectacularRedocView.as_view(url_name="schema"), name="redoc"),
-        path("", RedirectView.as_view(pattern_name="swagger-ui", permanent=False)),
     ]
 
 admin.site.site_header = "Secure Multi-Tenant Platform"

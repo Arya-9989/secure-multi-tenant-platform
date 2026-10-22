@@ -1,0 +1,102 @@
+/* Design tokens shared by the landing page and the themed API docs.
+   Slate neutrals, one teal accent (action and state only). Both themes are
+   designed; dark is not an inversion of light. */
+
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../fonts/InterVariable-opsz-latin.woff2") format("woff2-variations"),
+       url("../fonts/InterVariable-opsz-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono Variable";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("../fonts/JetBrainsMono-wght-latin.woff2") format("woff2-variations"),
+       url("../fonts/JetBrainsMono-wght-latin.woff2") format("woff2");
+}
+
+/* Metric-matched fallback so the swap to Inter does not shift layout. */
+@font-face {
+  font-family: "Inter Fallback";
+  src: local("Arial"), local("Helvetica Neue"), local("Helvetica");
+  size-adjust: 107.12%;
+  ascent-override: 90.44%;
+  descent-override: 22.52%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: "JetBrains Mono Fallback";
+  src: local("Consolas"), local("Menlo"), local("Courier New");
+  size-adjust: 109%;
+  ascent-override: 93.6%;
+  descent-override: 27.5%;
+  line-gap-override: 0%;
+}
+
+:root {
+  color-scheme: light dark;
+
+  --font-sans: "Inter Variable", "Inter Fallback", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono Fallback", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --bg: #ffffff;
+  --bg-alt: #f4f6f8;
+  --bg-elev: #ffffff;
+  --bg-sunk: #eef1f4;
+  --ink: #101418;
+  --ink-2: #48525e;
+  --ink-3: #5f6975;
+  --hairline: rgba(16, 20, 24, 0.1);
+  --hairline-strong: rgba(16, 20, 24, 0.18);
+
+  --accent: #0f766e;
+  --accent-hover: #0b5f58;
+  --on-accent: #ffffff;
+  --accent-ink: #0d6b64;
+  --accent-soft: rgba(15, 118, 110, 0.09);
+  --accent-line: rgba(15, 118, 110, 0.5);
+
+  --danger: #b4231a;
+  --danger-soft: rgba(180, 35, 26, 0.08);
+
+  --nav-bg: rgba(255, 255, 255, 0.78);
+  --shadow-tile: 0 1px 2px rgba(16, 20, 24, 0.04), 0 18px 48px -18px rgba(16, 32, 48, 0.16);
+  --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+
+  --ease: cubic-bezier(0.4, 0, 0.6, 1);
+  --r-tile: 28px;
+  --r-card: 18px;
+  --r-small: 8px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0a0d11;
+    --bg-alt: #10151b;
+    --bg-elev: #151b22;
+    --bg-sunk: #0d1116;
+    --ink: #f2f4f7;
+    --ink-2: #a9b3bf;
+    --ink-3: #8f99a5;
+    --hairline: rgba(255, 255, 255, 0.09);
+    --hairline-strong: rgba(255, 255, 255, 0.17);
+
+    --accent: #2dd4bf;
+    --accent-hover: #5eead4;
+    --on-accent: #032b27;
+    --accent-ink: #3fdcc8;
+    --accent-soft: rgba(45, 212, 191, 0.1);
+    --accent-line: rgba(45, 212, 191, 0.55);
+
+    --danger: #ff7b70;
+    --danger-soft: rgba(255, 123, 112, 0.1);
+
+    --nav-bg: rgba(10, 13, 17, 0.72);
+    --shadow-tile: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 24px 60px -24px rgba(0, 0, 0, 0.7);
+  }
+}

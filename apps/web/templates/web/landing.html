@@ -1,0 +1,359 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Secure Multi-Tenant Platform: every tenant, sealed</title>
+  <meta name="description" content="A multi-tenant SaaS backend in Django REST Framework: fail-closed tenant isolation, RBAC, expiring invitations, hardened JWT sessions and an append-only audit log, proven by {{ suite.total }} tests.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0a0d11" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="{% static 'web/favicon.svg' %}" type="image/svg+xml">
+  <link rel="preload" href="{% static 'web/fonts/InterVariable-opsz-latin.woff2' %}" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="{% static 'web/fonts/JetBrainsMono-wght-latin.woff2' %}" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{% static 'web/css/tokens.css' %}">
+  <link rel="stylesheet" href="{% static 'web/css/site.css' %}">
+  <script src="{% static 'web/js/site.js' %}" defer></script>
+</head>
+<body>
+{% include "web/_icons.html" %}
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="gnav">
+  <div class="wrap-wide">
+    <a class="brand" href="{% url 'landing' %}" aria-label="Secure Multi-Tenant Platform, home">
+      <svg aria-hidden="true"><use href="#i-mark"/></svg>
+      <span>Secure Multi-Tenant Platform</span>
+    </a>
+    <nav class="gnav-links" aria-label="Resources">
+      {% if docs_enabled %}<a href="{% url 'swagger-ui' %}">Swagger UI</a><a class="hide-sm" href="{% url 'redoc' %}">Redoc</a>{% endif %}
+      <a href="https://github.com/Arya-9989/secure-multi-tenant-platform">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<nav class="lnav" aria-label="On this page">
+  <div class="wrap-wide">
+    <a class="lnav-title" href="#top">Multi-Tenant Platform</a>
+    <div class="lnav-right">
+      <div class="lnav-links">
+        <a href="#isolation">Isolation</a>
+        <a href="#guarantees">Guarantees</a>
+        <a href="#roles">Roles</a>
+        <a href="#sessions">Sessions</a>
+        <a href="#audit">Audit</a>
+        <a href="#proof">Proof</a>
+      </div>
+      {% if docs_enabled %}<a class="btn btn-primary btn-small" href="{% url 'swagger-ui' %}">API docs</a>{% endif %}
+    </div>
+  </div>
+</nav>
+
+<main id="main">
+
+  <section class="hero" id="top" aria-labelledby="hero-title">
+    <div class="wrap">
+      <p class="eyebrow">Multi-tenant SaaS backend</p>
+      <h1 class="t-hero" id="hero-title">Every tenant.<br>Sealed.</h1>
+      <p class="t-lead">A Django REST Framework backend where tenant isolation is enforced in one place, fails closed, and is proven by <strong>{{ suite.total }} tests</strong>.</p>
+      <div class="ctas">
+        {% if docs_enabled %}<a class="btn btn-primary" href="{% url 'swagger-ui' %}">Explore the API</a>{% endif %}
+        <a class="btn btn-secondary" href="#isolation">How isolation works</a>
+      </div>
+      <p class="status" data-status data-url="{% url 'health-ready' %}" data-ready="{{ status.ready|yesno:'true,false' }}">
+        <span class="status-head"><span class="status-dot is-fresh" aria-hidden="true"></span><span class="status-label" data-status-label>{% if status.ready %}This server is ready{% else %}This server is degraded{% endif %}</span></span>
+        <span class="status-details">
+          <span>Database <span data-check="database">{{ status.checks.database }}</span></span>
+          <span>Cache <span data-check="cache">{{ status.checks.cache }}</span></span>
+          <span>Checked <time data-checked datetime="{{ status.checked_at|date:'c' }}">{{ status.checked_at|date:'H:i:s' }} UTC</time></span>
+        </span>
+      </p>
+    </div>
+
+    <div class="wrap-wide">
+      <figure class="vaults" aria-labelledby="vaults-caption">
+        <div class="vault vault-own">
+          <div class="vault-head">
+            <span class="vault-mark" aria-hidden="true">A</span>
+            <div class="vault-name"><strong>Acme Corp</strong><span>Organization <span class="mono">acme</span></span></div>
+            <span class="vault-badge">Alice&rsquo;s tenant</span>
+          </div>
+          <ul class="members" aria-label="Acme Corp members visible to Alice">
+            <li class="member"><span class="avatar" aria-hidden="true">AA</span><span class="member-name"><strong>Alice Admin</strong><span>alice@acme.test</span></span><span class="role-chip">ORG_ADMIN</span></li>
+            <li class="member"><span class="avatar" aria-hidden="true">BM</span><span class="member-name"><strong>Bob Member</strong><span>bob@acme.test</span></span><span class="role-chip">MEMBER</span></li>
+          </ul>
+        </div>
+
+        <div class="seam" aria-hidden="true"><span class="seal"><svg><use href="#i-lock"/></svg></span></div>
+
+        <div class="vault vault-sealed">
+          <div class="vault-head">
+            <span class="vault-mark" aria-hidden="true">G</span>
+            <div class="vault-name"><strong>Globex Inc</strong><span>Organization <span class="mono">globex</span></span></div>
+            <span class="vault-badge vault-badge-sealed"><svg aria-hidden="true"><use href="#i-lock"/></svg>Sealed</span>
+          </div>
+          <ul class="members" aria-label="Globex Inc members, absent for Alice">
+            <li class="member"><span class="avatar avatar-redacted" aria-hidden="true"></span><span class="redacted" aria-hidden="true"><i></i><i></i></span><span class="visually-hidden">Hidden member</span></li>
+            <li class="member"><span class="avatar avatar-redacted" aria-hidden="true"></span><span class="redacted" aria-hidden="true"><i></i><i></i></span><span class="visually-hidden">Hidden member</span></li>
+          </ul>
+        </div>
+
+        <div class="trace">
+          <div class="trace-row"><span class="who">alice@acme.test</span><span><span class="verb">GET</span> /api/v1/users/<span class="muted">{grace&rsquo;s id}</span>/</span></div>
+          <div class="trace-row"><span class="status-404">404 Not Found</span><span>{"detail": "No User matches the given query."}</span></div>
+          <p class="trace-note" id="vaults-caption"><strong>Same status, same body as a random UUID.</strong> Globex&rsquo;s rows aren&rsquo;t forbidden to Alice. For her session they don&rsquo;t exist, so nothing confirms they ever did. Accounts from <code class="mono">seed_demo</code>.</p>
+        </div>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section section-alt" id="isolation" aria-labelledby="isolation-title">
+    <div class="wrap-wide">
+      <div class="section-head center reveal">
+        <p class="eyebrow">Isolation</p>
+        <h2 class="t-section" id="isolation-title">Every request takes the same path.</h2>
+        <p class="t-lead"><code class="inline">TenantScopedViewSet</code> assembles the layers, so no view can forget one. Rows from another tenant are filtered out before a handler ever sees them.</p>
+      </div>
+      {% include "web/_pipeline.html" %}
+      <div class="legend" aria-hidden="true">
+        <span class="legend-item"><span class="legend-swatch"></span>Request continues</span>
+        <span class="legend-item"><span class="legend-swatch legend-swatch-reject"></span>Request rejected</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="guarantees" aria-labelledby="guarantees-title">
+    <div class="wrap-wide">
+      <div class="section-head reveal">
+        <p class="eyebrow">Guarantees</p>
+        <h2 class="t-section" id="guarantees-title">Five promises. Each one attacked by a test.</h2>
+        <p class="t-lead">Shared database, shared schema, an <code class="inline">organization</code> key on every tenant-owned row. The isolation lives in code, so the code path is centralised and the tests are adversarial.</p>
+      </div>
+      <div class="tiles">
+        <article class="tile tile-span-3 reveal">
+          <span class="tile-index">01</span>
+          <h3 class="t-tile">No cross-tenant reads.</h3>
+          <p class="t-body">A tenant user never receives another organization&rsquo;s rows: not through detail routes, list routes, filters such as <code class="inline">?organization=</code>, or search.</p>
+          <p class="proof"><span>Proven by</span><code>test_<wbr>cross_<wbr>tenant_<wbr>object_<wbr>access_<wbr>is_<wbr>denied</code><code>test_<wbr>list_<wbr>endpoints_<wbr>never_<wbr>return_<wbr>foreign_<wbr>rows</code></p>
+        </article>
+        <article class="tile tile-span-3 reveal">
+          <span class="tile-index">02</span>
+          <h3 class="t-tile">No cross-tenant writes.</h3>
+          <p class="t-body">Mutations on a foreign object fail before any state changes, and the test compares the row before and after to prove it is untouched.</p>
+          <p class="proof"><span>Proven by</span><code>test_<wbr>cross_<wbr>tenant_<wbr>object_<wbr>access_<wbr>is_<wbr>denied</code></p>
+        </article>
+        <article class="tile tile-span-2 reveal">
+          <span class="tile-index">03</span>
+          <h3 class="t-tile">No existence oracle.</h3>
+          <p class="t-body">A foreign ID gets the same <code class="inline">404</code> as a random UUID. A foreign ID in a request body gets the same &ldquo;does not exist&rdquo; error.</p>
+          <p class="proof"><span>Proven by</span><code>test_<wbr>unknown_<wbr>and_<wbr>foreign_<wbr>ids_<wbr>are_<wbr>indistinguishable</code></p>
+        </article>
+        <article class="tile tile-span-2 reveal">
+          <span class="tile-index">04</span>
+          <h3 class="t-tile">No escalation over HTTP.</h3>
+          <p class="t-body"><code class="inline">SUPER_ADMIN</code> can&rsquo;t be assigned through the API and membership is immutable. Unknown or read-only fields are rejected with <code class="inline">400</code>, never silently ignored.</p>
+          <p class="proof"><span>Proven by</span><code>test_privilege_escalation.py</code></p>
+        </article>
+        <article class="tile tile-span-2 reveal">
+          <span class="tile-index">05</span>
+          <h3 class="t-tile">Fail-closed by construction.</h3>
+          <p class="t-body">Anonymous, inactive or org-less callers see nothing. Undeclared actions are denied. A view whose queryset isn&rsquo;t tenant-aware raises <code class="inline">ImproperlyConfigured</code>.</p>
+          <p class="proof"><span>Proven by</span><code>test_<wbr>scoping_<wbr>fails_<wbr>closed_<wbr>for_<wbr>anonymous_<wbr>and_<wbr>orgless_<wbr>users</code></p>
+        </article>
+        <article class="tile tile-span-6 inverse reveal">
+          <span class="tile-index">And one more</span>
+          <h3 class="t-tile">A new endpoint can&rsquo;t ship unprotected.</h3>
+          <p class="t-body">Structural tests fail the build if an API route is missing from the isolation suite, a routed viewset doesn&rsquo;t subclass <code class="inline">TenantScopedViewSet</code>, or an action declares no permission.</p>
+          <p class="proof"><span>Proven by</span><code>test_<wbr>every_<wbr>api_<wbr>route_<wbr>is_<wbr>covered</code><code>test_<wbr>every_<wbr>routed_<wbr>viewset_<wbr>is_<wbr>tenant_<wbr>scoped_<wbr>and_<wbr>declares_<wbr>permissions</code></p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section-alt" id="roles" aria-labelledby="roles-title">
+    <div class="wrap-wide">
+      <div class="section-head reveal">
+        <p class="eyebrow">Roles</p>
+        <h2 class="t-section" id="roles-title">Three roles. One table.</h2>
+        <p class="t-lead">Views declare the permission each action needs. The table decides which roles hold it. Anything undeclared is denied.</p>
+      </div>
+      <div class="matrix-card reveal">
+        <div class="matrix-scroll" tabindex="0" role="region" aria-labelledby="matrix-caption">
+          <table class="matrix">
+            <caption class="visually-hidden" id="matrix-caption">Role to permission matrix</caption>
+            <thead>
+              <tr>
+                <th scope="col">Permission</th>
+                {% for role in matrix.roles %}<th scope="col" class="role"><span class="role-long">{{ role.label }}</span><span class="role-short" aria-hidden="true">{{ role.short }}</span><code>{{ role.code }}</code></th>{% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in matrix.rows %}
+              <tr>
+                <th scope="row">{{ row.label }}<code>{{ row.code }}</code></th>
+                {% for granted in row.cells %}
+                <td>{% if granted %}<span class="grant"><svg aria-hidden="true"><use href="#i-check"/></svg><span class="visually-hidden">Granted</span></span>{% else %}<span class="deny"><svg aria-hidden="true"><use href="#i-dash"/></svg><span class="visually-hidden">Not granted</span></span>{% endif %}</td>
+                {% endfor %}
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="matrix-foot">
+          <p class="t-caption">Rendered from <code class="mono">ROLE_PERMISSIONS</code> in <code class="mono">apps/accounts/roles.py</code> on every request.</p>
+          <p class="t-caption">Rows stay inside the caller&rsquo;s organization. Only super admins see across tenants.</p>
+        </div>
+      </div>
+      <p class="t-body events-caption reveal">Guard rails for every role: nobody can change their own role or status, super admin accounts can&rsquo;t be managed over HTTP, and every organization keeps at least one active admin.</p>
+    </div>
+  </section>
+
+  <section class="section" id="sessions" aria-labelledby="sessions-title">
+    <div class="wrap-wide">
+      <div class="section-head reveal">
+        <p class="eyebrow">Sessions</p>
+        <h2 class="t-section" id="sessions-title">Sessions you can actually end.</h2>
+        <p class="t-lead">JWTs stay stateless for signature and expiry. One indexed lookup per request makes revocation immediate, and role and tenant always come from the database, never from token claims.</p>
+      </div>
+      <div class="stats">
+        <div class="stat reveal">
+          <p class="stat-value"><b>{{ access_ttl.value }}</b><span>{{ access_ttl.unit }}</span></p>
+          <p>Access token lifetime. Audience and issuer are verified on every request.</p>
+        </div>
+        <div class="stat reveal">
+          <p class="stat-value"><b>{{ refresh_ttl.value }}</b><span>{{ refresh_ttl.unit }}</span></p>
+          <p>Refresh token lifetime. Each refresh rotates the token and blacklists the old one.</p>
+        </div>
+        <div class="stat reveal">
+          <p class="stat-value"><b>{{ invitation_ttl.value }}</b><span>{{ invitation_ttl.unit }}</span></p>
+          <p>Invitation expiry. Tokens are single-use, and only a SHA-256 digest is stored.</p>
+        </div>
+        <div class="stat reveal">
+          <p class="stat-value"><b>{{ auth_rate.value }}</b><span>{{ auth_rate.unit }}</span></p>
+          <p>Per-client limit on login, refresh, password change and invitation acceptance.</p>
+        </div>
+      </div>
+      <div class="tiles tiles-after reveal">
+        <article class="tile tile-span-6">
+          <h3 class="t-tile">One integer revokes everything.</h3>
+          <p class="t-body">Logging out everywhere, changing a password or being deactivated bumps the user&rsquo;s <code class="inline">token_version</code>. Every access and refresh token issued before it fails on the very next request. Deactivating an organization cuts off its members on their next request too. {% if password_min_length %}Passwords need at least {{ password_min_length }} characters.{% endif %}</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section inverse" id="audit" aria-labelledby="audit-title">
+    <div class="wrap-wide">
+      <div class="section-head reveal">
+        <p class="eyebrow">Audit</p>
+        <h2 class="t-section" id="audit-title">A history nobody can rewrite.</h2>
+        <p class="t-lead">Who, what, which tenant, IP, user agent and request ID, written in the same transaction as the change. The log never records something that rolled back.</p>
+      </div>
+      <div class="layers">
+        <div class="layer reveal">
+          <span class="layer-index">Layer 1 &middot; Model</span>
+          <h3>Saves only once.</h3>
+          <p><code class="mono">AuditLog.save()</code> refuses to update an existing row, and <code class="mono">delete()</code> always raises.</p>
+        </div>
+        <div class="layer reveal">
+          <span class="layer-index">Layer 2 &middot; QuerySet</span>
+          <h3>No bulk escape hatch.</h3>
+          <p><code class="mono">update()</code>, <code class="mono">delete()</code> and <code class="mono">bulk_update()</code> raise <code class="mono">AuditLogImmutableError</code>.</p>
+        </div>
+        <div class="layer reveal">
+          <span class="layer-index">Layer 3 &middot; PostgreSQL</span>
+          <h3>The database says no.</h3>
+          <p>A <code class="mono">BEFORE UPDATE OR DELETE</code> trigger rejects raw SQL too. Actors with history can&rsquo;t be hard-deleted.</p>
+        </div>
+      </div>
+      <ul class="events reveal" aria-label="Audit event types">
+        {% for action in audit_actions %}<li>{{ action }}</li>{% endfor %}
+      </ul>
+      <p class="t-caption events-caption">The {{ audit_actions|length }} event types, read from <code class="mono">AuditAction</code>. Tenant admins query their own organization&rsquo;s trail with cursor pagination.</p>
+    </div>
+  </section>
+
+  <section class="section" id="proof" aria-labelledby="proof-title">
+    <div class="wrap-wide">
+      <div class="section-head reveal">
+        <p class="eyebrow">Proof</p>
+        <h2 class="t-section" id="proof-title">Proven, not promised.</h2>
+        <p class="t-lead">Every tenant-scoped endpoint is attacked by a parametrized suite. CI runs it against PostgreSQL&nbsp;17, next to ruff, strict mypy and <code class="inline">check --deploy</code>.</p>
+      </div>
+      <div class="suite">
+        <div class="suite-total reveal">
+          <b>{{ suite.total }}</b>
+          <span>tests across {{ suite.files|length }} files</span>
+          <p class="t-caption">Counts are pinned by a test that fails when the suite and this page disagree.</p>
+        </div>
+        <ol class="bars" aria-label="Tests per file">
+          {% for file in suite.files %}
+          <li class="bar">
+            <span class="bar-name">{{ file.path }}</span>
+            <span class="bar-count">{{ file.tests }}</span>
+            <span class="bar-track" aria-hidden="true"><span class="bar-fill w-{{ file.share }}"></span></span>
+            <span class="bar-focus">{{ file.focus }}</span>
+          </li>
+          {% endfor %}
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section-alt" id="try" aria-labelledby="try-title">
+    <div class="wrap">
+      <div class="section-head center reveal">
+        <p class="eyebrow">Try it</p>
+        <h2 class="t-section" id="try-title">Now try to break it.</h2>
+        <p class="t-lead">Seed two tenants, sign in as Acme&rsquo;s admin, and ask for a Globex user.</p>
+      </div>
+      <div class="terminal reveal">
+        <div class="terminal-bar"><span>Terminal</span><span>Docker Compose, then curl and jq</span></div>
+<pre><code><span class="k">docker</span> compose up --build -d --wait
+<span class="k">docker</span> compose exec api python manage.py seed_demo --force
+
+API=http://localhost:8000/api/v1
+login() { curl -s -X POST $API/auth/login/ -H <span class="s">'Content-Type: application/json'</span> \
+  -d <span class="s">"{\"email\":\"$1\",\"password\":\"Demo-Passw0rd!2026\"}"</span> | jq -r .access; }
+ALICE=$(login alice@acme.test); GRACE=$(login grace@globex.test)
+GRACE_ID=$(curl -s $API/auth/me/ -H <span class="s">"Authorization: Bearer $GRACE"</span> | jq -r .id)
+
+curl -s -w <span class="s">' %{http_code}\n'</span> $API/users/$GRACE_ID/ -H <span class="s">"Authorization: Bearer $ALICE"</span>
+<span class="c"># {"detail":"No User matches the given query."} 404</span></code></pre>
+      </div>
+      {% if docs_enabled %}
+      <div class="endpoints">
+        <div class="endpoint reveal">
+          <h3>Swagger UI</h3>
+          <p>Authorize with a token and call every endpoint.</p>
+          <a class="link-more" href="{% url 'swagger-ui' %}">Open Swagger UI <svg aria-hidden="true"><use href="#i-chevron"/></svg></a>
+        </div>
+        <div class="endpoint reveal">
+          <h3>Redoc</h3>
+          <p>The full reference, with schemas and examples.</p>
+          <a class="link-more" href="{% url 'redoc' %}">Open Redoc <svg aria-hidden="true"><use href="#i-chevron"/></svg></a>
+        </div>
+        <div class="endpoint reveal">
+          <h3>OpenAPI schema</h3>
+          <p>OpenAPI 3, generated with zero warnings and validated in the tests.</p>
+          <a class="link-more" href="{% url 'schema' %}">Download schema <svg aria-hidden="true"><use href="#i-chevron"/></svg></a>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <div class="wrap-wide">
+    <p>Secure Multi-Tenant Platform. MIT License &copy; Arya Mahindrakar.</p>
+    <nav aria-label="Footer">
+      <a href="https://github.com/Arya-9989/secure-multi-tenant-platform">Source on GitHub</a>
+      {% if docs_enabled %}<a href="{% url 'swagger-ui' %}">Swagger UI</a><a href="{% url 'redoc' %}">Redoc</a>{% endif %}
+      <a href="{% url 'health-ready' %}">Readiness probe</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

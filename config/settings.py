@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     "apps.organizations",
     "apps.accounts",
     "apps.auditlogs",
+    "apps.web",
 ]
 
 MIDDLEWARE = [
