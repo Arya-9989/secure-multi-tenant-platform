@@ -255,6 +255,8 @@ SECURE_CSP = {
     "form-action": [CSP.SELF],
     "frame-ancestors": [CSP.NONE],
 }
+# Django's own CSRF failure page uses an inline <style>, which the CSP blocks.
+CSRF_FAILURE_VIEW = "apps.web.errors.csrf_failure"
 DATA_UPLOAD_MAX_MEMORY_SIZE = 1024 * 1024
 ADMIN_URL: str = env.str("DJANGO_ADMIN_URL", default="admin/")
 

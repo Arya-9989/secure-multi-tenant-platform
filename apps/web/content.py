@@ -35,6 +35,11 @@ TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
         "Mass assignment, self-promotion, last-admin invariant, forged tokens",
     ),
     SuiteFile(
+        "test_web.py",
+        26,
+        "This page, the API docs, error pages and the Content Security Policy",
+    ),
+    SuiteFile(
         "test_platform.py",
         24,
         "Health probes, OpenAPI schema, request IDs, JSON logs, secure settings",
@@ -48,11 +53,6 @@ TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
         "test_users_and_organizations.py",
         21,
         "Role changes, soft deactivation, database check constraints",
-    ),
-    SuiteFile(
-        "test_web.py",
-        19,
-        "This page, the API docs, error pages and the Content Security Policy",
     ),
     SuiteFile(
         "test_invitations.py",

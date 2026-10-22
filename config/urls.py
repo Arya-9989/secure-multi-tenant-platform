@@ -53,3 +53,9 @@ if settings.API_DOCS_ENABLED:
 
 admin.site.site_header = "Secure Multi-Tenant Platform"
 admin.site.site_title = "Platform admin"
+
+# Branded pages for people, DRF-style JSON under /api/ (see apps.web.errors).
+handler400 = "apps.web.errors.bad_request"
+handler403 = "apps.web.errors.permission_denied"
+handler404 = "apps.web.errors.page_not_found"
+handler500 = "apps.web.errors.server_error"

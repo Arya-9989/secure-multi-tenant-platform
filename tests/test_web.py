@@ -9,14 +9,18 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from django.test import Client, RequestFactory
 from rest_framework.test import APIClient
 
 from apps.accounts.roles import ROLE_PERMISSIONS, Perm
 from apps.auditlogs.models import AuditAction
+from apps.common.context import RequestContext, bind_request_context, reset_request_context
+from apps.web import errors
 from apps.web.content import TEST_SUITE
 from apps.web.views import PERMISSION_LABELS, Quantity, humanize_duration, humanize_rate
 
 HTML_PAGES = ("/", "/api/docs/", "/api/redoc/")
+ERROR_PAGE = "/no-such-page/"
 
 
 @pytest.mark.django_db
@@ -56,7 +60,7 @@ def test_landing_reports_a_degraded_dependency(
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize("url", HTML_PAGES)
+@pytest.mark.parametrize("url", [*HTML_PAGES, ERROR_PAGE])
 def test_pages_need_no_inline_code_or_third_party_assets(api_client: APIClient, url: str) -> None:
     html = api_client.get(url).content.decode()
 
@@ -69,7 +73,7 @@ def test_pages_need_no_inline_code_or_third_party_assets(api_client: APIClient, 
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize("url", [*HTML_PAGES, "/api/v1/auth/me/", "/health/live/"])
+@pytest.mark.parametrize("url", [*HTML_PAGES, ERROR_PAGE, "/api/v1/auth/me/", "/health/live/"])
 def test_strict_content_security_policy_on_every_response(api_client: APIClient, url: str) -> None:
     policy = api_client.get(url)["Content-Security-Policy"]
     directives = {
@@ -97,6 +101,57 @@ def test_swagger_init_script_is_served_separately(api_client: APIClient) -> None
     assert script.status_code == 200
     assert script["Content-Type"].startswith("application/javascript")
     assert "SwaggerUIBundle(" in script.content.decode()
+
+
+# ---------------------------------------------------------------- error pages
+@pytest.mark.django_db
+def test_unknown_pages_get_the_branded_404(api_client: APIClient) -> None:
+    response = api_client.get(ERROR_PAGE)
+    assert response.status_code == 404
+    assert response["Content-Type"].startswith("text/html")
+    html = response.content.decode()
+    assert "Error 404" in html
+    assert errors.ERRORS[404].title in html
+    assert 'href="/"' in html
+
+
+@pytest.mark.django_db
+def test_unknown_api_routes_answer_like_the_api(api_client: APIClient) -> None:
+    response = api_client.get("/api/v1/no-such-endpoint/")
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Not found."}
+
+
+@pytest.mark.parametrize(
+    ("path", "json"), [("/somewhere/", False), ("/api/v1/users/", True)], ids=["page", "api"]
+)
+def test_server_errors_are_branded_and_carry_the_request_id(path: str, json: bool) -> None:
+    request = RequestFactory().get(path)
+    token = bind_request_context(RequestContext("req-boom-0001", None, ""))
+    try:
+        response = errors.server_error(request)
+    finally:
+        reset_request_context(token)
+
+    assert response.status_code == 500
+    body = response.content.decode()
+    if json:
+        assert response["Content-Type"] == "application/json"
+        assert body == '{"detail": "A server error occurred."}'
+    else:
+        assert errors.ERRORS[500].title in body
+        assert "<code>req-boom-0001</code>" in body
+        assert not re.search(r"<script(?![^>]*\bsrc=)[^>]*>|<style|\sstyle=", body)
+
+
+@pytest.mark.django_db
+def test_csrf_failures_get_a_page_the_csp_allows() -> None:
+    """Django's own CSRF page relies on an inline <style> that the policy blocks."""
+    response = Client(enforce_csrf_checks=True).post("/admin/login/", {"username": "x"})
+    assert response.status_code == 403
+    html = response.content.decode()
+    assert "Error 403" in html
+    assert "<style" not in html
 
 
 @pytest.mark.parametrize(

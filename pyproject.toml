@@ -55,6 +55,7 @@ ignore = [
 "tests/**" = ["S101", "S105", "S106", "PLR0915"]
 "apps/accounts/management/**" = ["S105"]
 "manage.py" = ["PLC0415"]
+"apps/web/errors.py" = ["RUF001"]  # typographic apostrophes in page copy
 
 [tool.ruff.lint.isort]
 known-first-party = ["apps", "config"]

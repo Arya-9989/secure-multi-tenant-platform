@@ -1,0 +1,61 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ status }} · Secure Multi-Tenant Platform</title>
+  <meta name="description" content="{{ copy.title }} {{ copy.lead }}">
+  <meta name="robots" content="noindex">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0a0d11" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="{% static 'web/favicon.svg' %}" type="image/svg+xml">
+  <link rel="preload" href="{% static 'web/fonts/InterVariable-opsz-latin.woff2' %}" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{% static 'web/css/tokens.css' %}">
+  <link rel="stylesheet" href="{% static 'web/css/site.css' %}">
+</head>
+<body class="error-page">
+{% include "web/_icons.html" %}
+<header class="gnav">
+  <div class="wrap-wide">
+    <a class="brand" href="{% url 'landing' %}" aria-label="Secure Multi-Tenant Platform, home">
+      <svg aria-hidden="true"><use href="#i-mark"/></svg>
+      <span>Secure Multi-Tenant Platform</span>
+    </a>
+    <nav class="gnav-links" aria-label="Resources">
+      {% if docs_enabled %}<a href="{% url 'swagger-ui' %}">Swagger UI</a><a class="hide-sm" href="{% url 'redoc' %}">Redoc</a>{% endif %}
+      <a href="https://github.com/Arya-9989/secure-multi-tenant-platform">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main class="error" id="main">
+  <div class="wrap">
+    <div class="error-seal" aria-hidden="true">
+      <span class="error-seal-pane"></span>
+      <span class="error-seal-pane error-seal-pane-sealed"><svg><use href="#i-lock"/></svg></span>
+    </div>
+    <p class="eyebrow">Error {{ status }}</p>
+    <h1 class="t-section error-title">{{ copy.title }}</h1>
+    <p class="t-lead error-lead">{{ copy.lead }}{% if retry_after %} Try again in {{ retry_after }} second{{ retry_after|pluralize }}.{% endif %}</p>
+    {% if status == 500 and request_id %}
+    <p class="error-ref"><span>Request ID</span><code>{{ request_id }}</code></p>
+    {% endif %}
+    <div class="ctas">
+      <a class="btn btn-primary" href="{% url 'landing' %}">Go to the overview</a>
+      {% if docs_enabled %}<a class="btn btn-secondary" href="{% url 'swagger-ui' %}">Open the API reference</a>{% endif %}
+    </div>
+  </div>
+</main>
+
+<footer class="footer">
+  <div class="wrap-wide">
+    <p>Secure Multi-Tenant Platform. MIT License &copy; Arya Mahindrakar.</p>
+    <nav aria-label="Footer">
+      <a href="https://github.com/Arya-9989/secure-multi-tenant-platform">Source on GitHub</a>
+      <a href="{% url 'health-ready' %}">Readiness probe</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>
