@@ -172,6 +172,10 @@ def test_organization_create_rejects_unknown_fields(
             lambda w: forge_token(token_claims(w.super_admin), "", algorithm="none"), id="alg-none"
         ),
         pytest.param(
+            lambda w: forge_token(token_claims(w.member_a), settings.SECRET_KEY, algorithm="HS384"),
+            id="other-algorithm-same-key",
+        ),
+        pytest.param(
             lambda w: forge_token(
                 token_claims(w.member_a, aud="other-service"), settings.SECRET_KEY
             ),

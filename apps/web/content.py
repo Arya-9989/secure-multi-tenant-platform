@@ -31,7 +31,7 @@ TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
     ),
     SuiteFile(
         "test_privilege_escalation.py",
-        31,
+        32,
         "Mass assignment, self-promotion, last-admin invariant, forged tokens",
     ),
     SuiteFile(
