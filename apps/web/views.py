@@ -9,19 +9,32 @@ line from the same checks as ``/health/ready/``.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import hashlib
+from collections.abc import Callable, Mapping, Sequence
 from datetime import timedelta
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, NamedTuple, cast
 
 from django.conf import settings
 from django.contrib.auth import password_validation
+from django.contrib.staticfiles import finders
+from django.core.exceptions import ImproperlyConfigured
+from django.http import HttpRequest, HttpResponse
+from django.templatetags.static import static
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.csp import CSP
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_control
 from django.views.decorators.csp import csp_override
+from django.views.decorators.gzip import gzip_page
+from django.views.decorators.http import condition
 from django.views.generic import TemplateView
+from drf_spectacular.utils import extend_schema
 from drf_spectacular.views import SpectacularRedocView, SpectacularSwaggerSplitView
+from rest_framework.request import Request
+from rest_framework.response import Response
 
 from apps.accounts.roles import ROLE_PERMISSIONS, Perm, Role
 from apps.auditlogs.models import AuditAction
@@ -147,7 +160,7 @@ class ThemedSwaggerView(SpectacularSwaggerSplitView):
     """
 
     template_name = "web/swagger_ui.html"
-    title = "API reference · Secure Multi-Tenant Platform"
+    title = "API reference Â· Secure Multi-Tenant Platform"
 
 
 # Redoc renders with styled-components, which inserts <style> elements at
@@ -156,8 +169,7 @@ class ThemedSwaggerView(SpectacularSwaggerSplitView):
 # Redoc's `nonce` option) and blob: workers. Two style elements are inserted
 # as the bundle loads, before a nonce can be set, so they are allowed by hash:
 # the bundled perfect-scrollbar stylesheet and an empty element. Scripts stay
-# 'self' only. (Redoc also requests its logo from cdn.redoc.ly; img-src blocks
-# that, and Redoc then drops the image.)
+# 'self' only.
 REDOC_STYLE_HASHES = (
     "'sha256-QMIg+bpjm3JdElJ388KYke01izlUW0UoNOeKjpMxdgc='",  # perfect-scrollbar CSS
     "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='",  # empty <style>
@@ -168,6 +180,81 @@ REDOC_CSP: Mapping[str, Sequence[str]] = {
     "worker-src": [CSP.SELF, "blob:"],
 }
 
+REDOC_BUNDLE = "drf_spectacular_sidecar/redoc/bundles/redoc.standalone.js"
+REDOC_LOGO = "web/vendor/redoc/logo-mini.svg"
+
+
+class _Patch(NamedTuple):
+    find: str
+    replace: Callable[[], str]
+    why: str
+
+
+# Edits to the vendored Redoc bundle. Each must match exactly once, so an
+# upgrade that changes the bundle fails loudly (and in the tests) instead of
+# silently shipping the original.
+REDOC_PATCHES = (
+    _Patch(
+        "https://cdn.redoc.ly/redoc/logo-mini.svg",
+        lambda: static(REDOC_LOGO),
+        "its attribution logo is fetched from Redocly's CDN: a third-party request "
+        "that the CSP blocks, logging an error on every page view",
+    ),
+    _Patch(
+        ".h5`\n  border-bottom: 1px solid rgba(38, 50, 56, 0.3);\n  margin: 1em 0 1em 0;\n"
+        "  color: rgba(38, 50, 56, 0.7);",
+        lambda: (
+            ".h3`\n  border-bottom: 1px solid var(--hairline-strong);\n  margin: 1em 0 1em 0;\n"
+            "  color: var(--ink-2);"
+        ),
+        "section labels such as 'Request body schema' are <h5> directly under the "
+        "operation's <h2>, skipping two heading levels for screen-reader navigation; "
+        "their fixed colours are also meant for a light background only",
+    ),
+    _Patch(
+        "color: #0e7c86;",
+        lambda: "color: var(--accent-ink);",
+        "regex patterns are drawn in a fixed teal that fails contrast in the dark theme",
+    ),
+)
+
+
+@lru_cache(maxsize=1)
+def self_hosted_redoc_bundle() -> tuple[bytes, str]:
+    """The sidecar's Redoc bundle with :data:`REDOC_PATCHES` applied, and its digest."""
+    path = finders.find(REDOC_BUNDLE)
+    if not isinstance(path, str):
+        raise ImproperlyConfigured(
+            f"{REDOC_BUNDLE} not found; is drf-spectacular-sidecar installed?"
+        )
+    source = Path(path).read_text(encoding="utf-8")
+    for patch in REDOC_PATCHES:
+        if source.count(patch.find) != 1:
+            msg = f"The Redoc bundle changed: expected {patch.find!r} exactly once ({patch.why})."
+            raise ImproperlyConfigured(msg)
+        source = source.replace(patch.find, patch.replace())
+    content = source.encode()
+    return content, hashlib.sha256(content).hexdigest()[:16]
+
+
+def redoc_bundle_url() -> str:
+    return f"{reverse('redoc-bundle')}?v={self_hosted_redoc_bundle()[1]}"
+
+
+def _redoc_bundle_etag(request: HttpRequest) -> str:
+    return self_hosted_redoc_bundle()[1]
+
+
+@gzip_page
+@condition(etag_func=_redoc_bundle_etag)
+def redoc_bundle(request: HttpRequest) -> HttpResponse:
+    """Serve the patched bundle. The URL carries its digest, so it caches forever."""
+    response = HttpResponse(
+        self_hosted_redoc_bundle()[0], content_type="text/javascript; charset=utf-8"
+    )
+    response["Cache-Control"] = "public, max-age=31536000, immutable"
+    return response
+
 
 @method_decorator(csp_override(REDOC_CSP), name="dispatch")
 class ThemedRedocView(SpectacularRedocView):
@@ -175,3 +262,9 @@ class ThemedRedocView(SpectacularRedocView):
 
     template_name = "web/redoc.html"
     title = "API reference · Secure Multi-Tenant Platform"
+
+    @extend_schema(exclude=True)
+    def get(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        response: Response = super().get(request, *args, **kwargs)  # type: ignore[no-untyped-call]
+        cast(dict[str, Any], response.data)["redoc_standalone"] = redoc_bundle_url()
+        return response

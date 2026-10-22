@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import re
 from collections import Counter
 from datetime import timedelta
@@ -10,6 +11,7 @@ from typing import Any, cast
 
 import pytest
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.test import Client, RequestFactory
 from rest_framework.test import APIClient
 
@@ -17,6 +19,7 @@ from apps.accounts.roles import ROLE_PERMISSIONS, Perm
 from apps.auditlogs.models import AuditAction
 from apps.common.context import RequestContext, bind_request_context, reset_request_context
 from apps.web import errors
+from apps.web import views as web_views
 from apps.web.content import TEST_SUITE
 from apps.web.views import PERMISSION_LABELS, Quantity, humanize_duration, humanize_rate
 
@@ -115,6 +118,44 @@ def test_swagger_keeps_deep_links_with_the_accessibility_plugin(api_client: APIC
     plugin = scripts.index("/static/web/js/swagger-plugins.js")
     init = next(i for i, src in enumerate(scripts) if "script" in src.split("?", 1)[-1])
     assert bundle < plugin < init
+
+
+@pytest.mark.django_db
+def test_redoc_runs_a_self_hosted_bundle_that_makes_no_third_party_requests(
+    api_client: APIClient,
+) -> None:
+    page = api_client.get("/api/redoc/").content.decode()
+    src = re.search(r'<script src="(/api/redoc/redoc\.standalone\.js\?v=[0-9a-f]{16})"', page)
+    assert src, "the page must load the patched bundle"
+
+    response = api_client.get(src.group(1), HTTP_ACCEPT_ENCODING="gzip")
+    assert response.status_code == 200
+    assert response["Content-Type"].startswith("text/javascript")
+    assert response["Content-Encoding"] == "gzip"
+    assert "immutable" in response["Cache-Control"]
+    bundle = gzip.decompress(response.content).decode()
+    assert "cdn.redoc.ly" not in bundle
+    assert '"/static/web/vendor/redoc/logo-mini.svg"' in bundle
+    assert "#0e7c86" not in bundle, "the low-contrast pattern colour"
+    assert ".h5`" not in bundle, "section labels that skip heading levels"
+    assert api_client.get(src.group(1)).content == bundle.encode()
+
+    cached = api_client.get(src.group(1), HTTP_IF_NONE_MATCH=response["ETag"])
+    assert cached.status_code == 304
+
+
+def test_redoc_patches_fail_loudly_when_the_bundle_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stale = (web_views._Patch("not in the bundle", lambda: "", "test"),)
+    monkeypatch.setattr(web_views, "REDOC_PATCHES", stale)
+    web_views.self_hosted_redoc_bundle.cache_clear()
+    try:
+        with pytest.raises(ImproperlyConfigured, match="Redoc bundle changed"):
+            web_views.self_hosted_redoc_bundle()
+    finally:
+        monkeypatch.undo()
+        web_views.self_hosted_redoc_bundle.cache_clear()
 
 
 # ---------------------------------------------------------------- error pages

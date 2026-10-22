@@ -527,8 +527,8 @@ body {
 #redoc-container [role="search"] input { color: var(--ink); }
 #redoc-container a { text-decoration-thickness: 1px; text-underline-offset: 0.18em; }
 /* A few Redoc elements ignore the theme object; pin them to the tokens. */
-#redoc-container h5 { color: var(--ink-2) !important; }
-#redoc-container h5 span { color: var(--ink) !important; }
+/* Section labels ("Request body schema: application/json"), an h3 in our bundle. */
+#redoc-container h3 > span { color: var(--ink); }
 #redoc-container .react-tabs__tab--selected { color: #101418 !important; background: #e7ebef !important; }
 #redoc-container .react-tabs__tab { border-radius: 980px !important; }
 
@@ -555,3 +555,4 @@ body {
 #redoc-container .token.string { color: #fcd9a8 !important; }
 #redoc-container .token.number,
 #redoc-container .token.boolean { color: #5eead4 !important; }
+

@@ -17,7 +17,7 @@ from apps.accounts.views.users import UserViewSet
 from apps.auditlogs.views import AuditLogViewSet
 from apps.common.views import LivenessView, ReadinessView
 from apps.organizations.views import OrganizationViewSet
-from apps.web.views import LandingView, ThemedRedocView, ThemedSwaggerView
+from apps.web.views import LandingView, ThemedRedocView, ThemedSwaggerView, redoc_bundle
 
 router = SimpleRouter()
 router.register("organizations", OrganizationViewSet, basename="organization")
@@ -49,6 +49,7 @@ if settings.API_DOCS_ENABLED:
         path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
         path("api/docs/", ThemedSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
         path("api/redoc/", ThemedRedocView.as_view(url_name="schema"), name="redoc"),
+        path("api/redoc/redoc.standalone.js", redoc_bundle, name="redoc-bundle"),
     ]
 
 # Branded pages for people, DRF-style JSON under /api/ (see apps.web.errors).
