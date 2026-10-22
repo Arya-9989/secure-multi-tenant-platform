@@ -35,6 +35,7 @@ class AuditAction(models.TextChoices):
     API_KEY_CREATED = "api_key.created", "API key created"
     API_KEY_ROTATED = "api_key.rotated", "API key rotated"
     API_KEY_REVOKED = "api_key.revoked", "API key revoked"
+    AUDIT_RETENTION_APPLIED = "audit.retention_applied", "Audit log retention applied"
     SSO_PROVIDER_CREATED = "sso.provider_created", "SSO provider configured"
     SSO_PROVIDER_UPDATED = "sso.provider_updated", "SSO provider updated"
     SSO_PROVIDER_DELETED = "sso.provider_deleted", "SSO provider removed"
@@ -49,6 +50,9 @@ class AuditAction(models.TextChoices):
 
 class AuditLogImmutableError(Exception):
     """Raised on any attempt to modify or delete an audit record."""
+
+
+UNCHAINED = "Audit events are appended with apps.auditlogs.services.record(), which chains them."
 
 
 class AuditLogQuerySet(TenantQuerySet["AuditLog"]):
@@ -73,7 +77,8 @@ class AuditLogQuerySet(TenantQuerySet["AuditLog"]):
         # ``update_conflicts`` turns the insert into an upsert, i.e. an update.
         if update_conflicts:
             raise AuditLogImmutableError("Audit log entries cannot be updated.")
-        return super().bulk_create(objs, batch_size=batch_size, ignore_conflicts=ignore_conflicts)
+        # A bulk insert would skip the hash chain (ADR 0006): one at a time, by record().
+        raise AuditLogImmutableError(UNCHAINED)
 
 
 class AuditLog(models.Model):
@@ -109,6 +114,10 @@ class AuditLog(models.Model):
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     user_agent = models.CharField(max_length=512, blank=True)
     request_id = models.CharField(max_length=64, blank=True)
+    # Tamper evidence (ADR 0006): one hash chain per tenant (and one for the platform).
+    chain_seq = models.BigIntegerField(default=0, editable=False)
+    prev_hash = models.CharField(max_length=64, default="", editable=False)
+    hash = models.CharField(max_length=64, default="", editable=False)
 
     objects = AuditLogQuerySet.as_manager()
 
@@ -118,6 +127,7 @@ class AuditLog(models.Model):
             models.Index(fields=("organization", "-created_at")),
             models.Index(fields=("action", "-created_at")),
             models.Index(fields=("request_id",)),
+            models.Index(fields=("organization", "-chain_seq"), name="auditlog_chain_head"),
         )
 
     def __str__(self) -> str:
@@ -126,6 +136,8 @@ class AuditLog(models.Model):
     def save(self, *args: Any, **kwargs: Any) -> None:
         if not self._state.adding:
             raise AuditLogImmutableError("Audit log entries cannot be updated.")
+        if not self.hash or self.chain_seq < 1:
+            raise AuditLogImmutableError(UNCHAINED)
         kwargs["force_insert"] = True
         super().save(*args, **kwargs)
 
@@ -135,3 +147,50 @@ class AuditLog(models.Model):
     @property
     def tenant_id(self) -> uuid.UUID | None:
         return self.organization_id
+
+
+class AuditChainCheckpoint(models.Model):
+    """Where a chain resumes after retention dropped its oldest rows (ADR 0006).
+
+    Append-only by convention: verification uses the latest checkpoint per chain,
+    so a retention cut is distinguishable from a deletion.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(
+        "organizations.Organization",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="The chain's tenant; empty for the platform chain.",
+    )
+    chain_seq = models.BigIntegerField(help_text="The last sequence number that was dropped.")
+    hash = models.CharField(max_length=64)
+    last_created_at = models.DateTimeField()
+    partition = models.CharField(max_length=63)
+    created_at = models.DateTimeField(default=timezone.now, editable=False)
+
+    objects = TenantQuerySet.as_manager()
+
+    class Meta:
+        ordering = ("-chain_seq",)
+        indexes = (models.Index(fields=("organization", "-chain_seq")),)
+
+    def __str__(self) -> str:
+        return f"checkpoint {self.organization_id or 'platform'}@{self.chain_seq}"
+
+    @property
+    def tenant_id(self) -> uuid.UUID | None:
+        return self.organization_id
+
+
+class AuditExportCursor(models.Model):
+    """The last sequence number of each chain delivered to the SIEM (ADR 0006)."""
+
+    chain = models.CharField(max_length=36, primary_key=True)
+    last_seq = models.BigIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return f"{self.chain}@{self.last_seq}"

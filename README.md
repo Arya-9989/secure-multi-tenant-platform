@@ -68,9 +68,15 @@ exactly what a nonexistent ID returns.</sub>
   Each request re-checks the user, the organization, a per-user `token_version` and that its
   session is still live, in the one query that loads the user
   ([ADR 0002](docs/adr/0002-refresh-token-families.md)).
-- **Append-only audit log.** It records who, what, which tenant, IP, user agent and request
-  ID, written in the same transaction as the change. The model, its QuerySet and a
-  PostgreSQL trigger all reject updates and deletes.
+- **Append-only audit log, tamper-evident and streamed to a SIEM.** It records who, what,
+  which tenant, IP, user agent and request ID, written in the same transaction as the change.
+  The model, its QuerySet and a PostgreSQL trigger all reject updates and deletes. Each
+  tenant's events form an HMAC-SHA256 hash chain keyed outside the database, and
+  `manage.py verify_audit_chain` names any modified, deleted, reordered or forged row and a
+  truncated tail. The table is partitioned by month; retention drops whole partitions and
+  leaves checkpoints so a retention cut is not mistaken for tampering. `stream_audit_log`
+  ships every event, in order and signed, to a SIEM over HTTP (Vector in compose)
+  ([ADR 0006](docs/adr/0006-audit-log-integrity-retention-siem.md)).
 - **Production packaging.** Multi-stage, non-root Docker image running gunicorn with a
   healthcheck. Compose stack with Postgres and Redis. Structured JSON logs carry a request ID.
   Settings come from env vars with secure defaults.
@@ -214,6 +220,18 @@ docker compose exec -e APP_DB_SCOPE=platform api python manage.py createsuperuse
 If you ran an earlier version of this stack, remove its volume first
 (`docker compose down -v`) so the roles are created.
 
+### Operating the audit log
+
+```bash
+docker compose exec api python manage.py verify_audit_chain        # exit 1 on any tampering
+docker compose run --rm migrate python manage.py audit_partitions --months-ahead 3   # monthly, as the owner
+docker compose run --rm migrate python manage.py audit_retention --keep-months 12 --dry-run
+docker compose --profile siem up -d --build --wait                  # Vector + the streaming worker
+docker compose exec vector sh -c 'cat /var/lib/vector/audit/*.ndjson'
+```
+
+`migrate` connects as the schema owner, which partition management and retention need.
+
 ### Local (uv + SQLite)
 
 ```bash
@@ -259,7 +277,8 @@ flowchart LR
     end
 
     gunicorn --> mw
-    svc --> pg[(PostgreSQL<br/>row-level security<br/>check constraints<br/>append-only trigger)]
+    svc --> pg[(PostgreSQL<br/>row-level security<br/>check constraints<br/>append-only, hash-chained,<br/>partitioned audit log)]
+    pg -. stream_audit_log .-> siem[[SIEM / Vector]]
     audit --> pg
     perms -. throttle counters .-> redis[(Redis)]
     mw -. JSON logs .-> stdout[[stdout]]
@@ -394,7 +413,8 @@ is in [ADR 0001](docs/adr/0001-postgres-row-level-security.md).
 | Dodging the rate limit with a forged `X-Forwarded-For` | Throttles key on the audited client IP (`get_client_ip`), which ignores the header unless `NUM_PROXIES` > 0 and then takes the address the outermost trusted proxy appended | `test_login_throttle_ignores_a_spoofed_forwarded_for`, `test_behind_a_trusted_proxy_the_throttle_keys_on_the_address_it_appended` |
 | Account enumeration | One generic login error, and unknown emails are delayed exactly like real ones. Invitation acceptance fails generically, including when another sign-up takes the address mid-request. Inviting an email registered in another tenant reveals nothing | `test_failed_logins_are_generic_and_audited`, `test_unknown_emails_are_throttled_exactly_like_real_ones`, `test_no_cross_tenant_email_enumeration`, `test_a_signup_race_for_the_same_email_fails_generically` |
 | Invitation tokens leaked from the DB | Only a SHA-256 digest is stored. Tokens are single-use and expire after 72h | `test_invitation_lifecycle`, `test_unusable_tokens_fail_generically` |
-| Audit tampering | Model, QuerySet (including `bulk_create` upserts) and admin are read-only. A PostgreSQL `BEFORE UPDATE OR DELETE` trigger blocks raw SQL. Actors with history cannot be hard-deleted (`PROTECT`) | `test_audit_log.py` (incl. `test_database_trigger_rejects_raw_sql_mutation`, `test_bulk_create_cannot_upsert_over_existing_entries`) |
+| Audit tampering | Model, QuerySet (no bulk inserts or upserts) and admin are read-only. A PostgreSQL `BEFORE UPDATE OR DELETE` trigger blocks raw SQL, the runtime role has only `SELECT, INSERT`, and partitions are reachable only through the parent. Actors with history cannot be hard-deleted (`PROTECT`) | `test_audit_log.py` (incl. `test_database_trigger_rejects_raw_sql_mutation`, `test_bulk_create_cannot_upsert_over_existing_entries`), `test_the_runtime_role_cannot_read_partitions_directly` |
+| Audit history rewritten by someone with database access (the owner, a restored backup) | Per-tenant HMAC hash chains with the key outside the database; `verify_audit_chain`; retention checkpoints; the SIEM's copy and per-chain cursors anchor the chain outside the database and expose a truncated tail | `test_audit_chain.py` (modified, deleted, reordered, forged rows; recomputed with a guessed key; truncated tail; 10 concurrent writers; retention) |
 | The Django admin as a side door | Sign-in throttled and audited like the API. Logging out everywhere, deactivation and an admin password change end admin sessions and API tokens alike. Sessions are listed without any token or token ID, and can't be edited or deleted, so none can be revived. Tenant changes go through the audited services, and tenants can't be deleted | `test_admin.py` |
 | Spoofed client IP or log injection | `X-Forwarded-For` is trusted only with `NUM_PROXIES` > 0. Caller request IDs must match `[A-Za-z0-9._-]{8,64}` | `test_client_ip_trusts_only_configured_proxies`, `test_request_id_is_propagated_or_generated` |
 | Injected script or framing on the landing page, API docs, error pages and admin | A strict CSP on every response: scripts, styles and fonts from the app's own origin only, no `'unsafe-inline'`, `frame-ancestors 'none'`. The pages contain no inline code and make no third-party requests | `test_web.py::test_strict_content_security_policy_on_every_response`, `test_pages_need_no_inline_code_or_third_party_assets`, `test_redoc_runs_a_self_hosted_bundle_that_makes_no_third_party_requests`, `test_admin.py::test_every_admin_page_works_under_the_strict_csp` |
@@ -497,7 +517,7 @@ Audit events: `auth.login_succeeded`, `auth.login_failed`, `auth.refresh_reuse_d
 `mfa.totp_disabled`, `mfa.webauthn_added`, `mfa.webauthn_removed`,
 `mfa.recovery_codes_generated`, `mfa.reset`, `api_key.created`, `api_key.rotated`,
 `api_key.revoked`, `sso.provider_created`, `sso.provider_updated`,
-`sso.provider_deleted`, `user.profile_updated`, `user.role_changed`, `user.deactivated`,
+`sso.provider_deleted`, `audit.retention_applied`, `user.profile_updated`, `user.role_changed`, `user.deactivated`,
 `user.reactivated`, `invitation.created`, `invitation.revoked`, `invitation.accepted`.
 
 With MFA enabled, `POST auth/login/` answers a correct password with
@@ -539,6 +559,9 @@ of them explicitly.
 | `MFA_ISSUER` / `MFA_CHALLENGE_TTL_SECONDS` | `Secure Multi-Tenant Platform` / `300` | Name shown in authenticator apps; lifetime of the second sign-in step |
 | `WEBAUTHN_RP_ID` / `WEBAUTHN_RP_NAME` / `WEBAUTHN_ORIGINS` | `localhost` / platform name / `http://localhost:8000` | WebAuthn relying party: your registrable domain and the exact origins your pages run on |
 | `SSO_CALLBACK_URL` / `FRONTEND_SSO_URL` | `http://localhost:8000/api/v1/auth/sso/callback/` / `http://localhost:3000/sso/complete` | The redirect URI to register with IdPs; the page that receives the one-time code |
+| `AUDIT_CHAIN_KEY` | *(derived from `DJANGO_SECRET_KEY`)* | HMAC key of the audit hash chains. Set it explicitly, keep it secret and stable: rotating it breaks verification of older events |
+| `AUDIT_SIEM_URL` / `AUDIT_SIEM_SECRET` | *(unset)* | Where `stream_audit_log` sends NDJSON batches, and the HMAC key of their `X-Audit-Signature` header |
+| `AUDIT_SIEM_BATCH_SIZE` / `AUDIT_SIEM_TIMEOUT_SECONDS` / `AUDIT_SIEM_MAX_ATTEMPTS` | `500` / `5` / `5` | Batch size, per-request timeout, attempts (exponential backoff with jitter) |
 | `SSO_HTTP_TIMEOUT_SECONDS` / `SSO_ALLOW_HTTP` | `5` / `False` | Timeout for calls to IdPs; plain-HTTP IdPs (only for a local Keycloak) |
 | `THROTTLE_AUTH` / `THROTTLE_ANON` / `THROTTLE_USER` | `10/min` / `60/min` / `600/min` | Rate limits |
 | `LOGIN_ACCOUNT_FREE_ATTEMPTS` / `LOGIN_ACCOUNT_BASE_DELAY_SECONDS` / `LOGIN_ACCOUNT_MAX_DELAY_SECONDS` | `5` / `2` / `900` | Per-account sign-in delays: free attempts, the first delay (it doubles), the cap |
@@ -590,7 +613,8 @@ PostgreSQL in CI.
 | `test_sso.py` | OIDC against an in-process IdP that checks PKCE and client credentials: 14 forged or broken ID tokens, discovery mix-up, insecure endpoints, state and code replay, key rotation, no IdP crossing tenants or minting super admins, no just-in-time accounts, subject takeover, provider management with an encrypted, never-returned secret, the HTTP client's timeouts and errors |
 | `test_sessions.py` | Refresh-token families: a replayed token revokes the session and is audited once, identical errors, forged session claims, absolute expiry, reasons on every revocation, `prune_sessions`, 8 concurrent refreshes with one winner |
 | `test_invitations.py` | Lifecycle, expiry, revocation, single use, weak passwords, sign-up races, enumeration resistance |
-| `test_audit_log.py` | Immutability (ORM, bulk upserts and PostgreSQL trigger), context capture, filters, cursor pagination |
+| `test_audit_log.py` | Immutability (ORM, bulk inserts and upserts, PostgreSQL trigger), context capture, filters, cursor pagination |
+| `test_audit_chain.py` | Hash chains: per-tenant sequences and links, stable hashes through the JSON column, monotonic time, verification that finds modified, deleted, reordered and forged rows (even rehashed with a guessed key) and a truncated tail, 10 concurrent writers; monthly partitions and the runtime role's lack of access to them; retention with checkpoints and `--dry-run`; SIEM streaming that is signed, ordered, resumable and retried with backoff |
 | `test_admin.py` | The Django admin: throttled and audited sign-in, sessions that end with logout-all and password changes, stored tokens never shown, no un-revoking, audited tenant changes, every page under the strict CSP, fonts that swap in without moving the layout |
 | `test_users_and_organizations.py` | Role changes, soft deactivation, slugs, uniqueness, DB check constraints |
 | `test_platform.py` | Health probes, OpenAPI schema (zero warnings, validated), request IDs, JSON logs, secure settings, `seed_demo` |
@@ -631,8 +655,10 @@ docker compose --profile sso run --rm sso-e2e
 │   │   │                # backends.py + scopes.py (sign-in under row-level security),
 │   │   ├── serializers/ # services.py (business rules), views/, management/commands/seed_demo.py
 │   │   └── views/
-│   ├── auditlogs/       # AuditLog model, record() service, read-only API,
-│   │   └── migrations/  # 0002_append_only_trigger.py
+│   ├── auditlogs/       # AuditLog model, record() service (hash chain), read-only API, chain.py,
+│   │   │                # partitions.py, siem.py, verify_audit_chain / audit_partitions /
+│   │   │                # audit_retention / stream_audit_log commands
+│   │   └── migrations/  # 0002_append_only_trigger.py, 0008_partition_by_month.py
 │   ├── apikeys/         # ApiKey model, services (issue, rotate, revoke, authenticate), auth class
 │   ├── mfa/             # totp.py (RFC 6238), services.py (TOTP, WebAuthn, recovery codes), views
 │   └── sso/             # oidc.py (PKCE, ID-token validation), provider model, services, views
@@ -641,6 +667,7 @@ docker compose --profile sso run --rm sso-e2e
 ├── tests/               # pytest-django suite (see table above)
 ├── docs/                # adr/ (design decisions), README hero (light/dark SVG), screenshots/
 ├── docker/postgres/     # initdb/10-roles.sh: the owner and runtime roles
+├── docker/vector/       # vector.yaml: the local SIEM stand-in (compose profile siem)
 ├── docker/keycloak/     # acme-realm.json: the local IdP's realm, client and test users
 ├── Dockerfile           # multi-stage, non-root, gunicorn, HEALTHCHECK
 ├── docker-compose.yml   # api + migrate + postgres + redis
@@ -719,8 +746,6 @@ None of these are implemented yet.
 
 - SAML 2.0 single sign-on, deferred: the vetted Python libraries need the `xmlsec1` native
   stack, and OIDC covers the same need with every major IdP (see ADR 0004).
-- Audit log streaming to a SIEM, time-based partitioning and retention, and hash-chaining
-  for tamper evidence beyond the database.
 - Asynchronous email delivery (task queue plus provider) with delivery status on invitations.
 - OpenTelemetry tracing correlated with the existing request IDs.
 

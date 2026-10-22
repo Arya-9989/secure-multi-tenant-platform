@@ -213,7 +213,7 @@ def test_raw_sql_cannot_write_rows_into_another_tenant(world: World) -> None:
                 [uuid.uuid4(), world.org_b.pk],
             )
         with refused():  # a tenant cannot forge platform-level events either
-            AuditLog.objects.create(action=AuditAction.LOGOUT, organization=None)
+            record(AuditAction.LOGOUT, organization=None)
     assert not Invitation.objects.filter(email="mole@evil.test").exists()
     assert User.objects.get(pk=world.member_a.pk).organization == world.org_a
 

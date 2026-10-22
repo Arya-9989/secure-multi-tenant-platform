@@ -163,6 +163,15 @@ def grant_runtime_privileges(connection: BaseDatabaseWrapper, role: str) -> None
             cursor.execute("SELECT to_regclass(%s)", [table])
             if cursor.fetchone()[0] is not None:
                 cursor.execute(f"REVOKE UPDATE, DELETE, TRUNCATE ON {table} FROM {quoted}")
+            # Partitions (ADR 0006) are reached only through the parent, where the
+            # policies and the append-only trigger are: no direct privilege at all.
+            cursor.execute(
+                "SELECT c.relname FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid "
+                "WHERE i.inhparent = to_regclass(%s)",
+                [table],
+            )
+            for (partition,) in cursor.fetchall():
+                cursor.execute(f"REVOKE ALL ON {partition} FROM {quoted}")
 
 
 def grant_runtime_role(apps: Any, schema_editor: BaseDatabaseSchemaEditor) -> None:

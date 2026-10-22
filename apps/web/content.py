@@ -70,6 +70,11 @@ TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
         "Health probes, OpenAPI schema, request IDs, JSON logs, secure settings",
     ),
     SuiteFile(
+        "test_audit_chain.py",
+        22,
+        "Hash chains catch edits, deletions and reorders; partitions, retention, SIEM",
+    ),
+    SuiteFile(
         "test_auth.py",
         21,
         "Login auditing, spoof-proof throttling, logout everywhere, deactivation",
@@ -91,7 +96,7 @@ TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
     ),
     SuiteFile(
         "test_audit_log.py",
-        12,
+        13,
         "Immutability in the ORM and in the PostgreSQL trigger, filters",
     ),
     SuiteFile(

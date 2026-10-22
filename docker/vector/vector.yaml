@@ -1,0 +1,26 @@
+# Stands in for a SIEM on the local stack (docker compose --profile siem, ADR 0006).
+# Receives the audit stream on an HTTP source and writes it to a file; in a real
+# deployment the same source would forward to Splunk, Elastic, Loki or S3.
+api:
+  enabled: true
+  address: 0.0.0.0:8686
+
+sources:
+  audit:
+    type: http_server
+    address: 0.0.0.0:9000
+    path: /audit
+    method: POST
+    headers: ["X-Audit-Signature", "X-Audit-Batch"]
+    framing:
+      method: newline_delimited
+    decoding:
+      codec: json
+
+sinks:
+  audit_file:
+    type: file
+    inputs: ["audit"]
+    path: /var/lib/vector/audit/events-%Y-%m-%d.ndjson
+    encoding:
+      codec: json

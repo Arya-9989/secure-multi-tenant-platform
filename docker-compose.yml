@@ -124,5 +124,46 @@ services:
         condition: service_healthy
     restart: "no"
 
+  # ------------------------------------------------ SIEM streaming, local only
+  #   docker compose --profile siem up -d --build --wait
+  #   docker compose exec vector sh -c 'cat /var/lib/vector/audit/*.ndjson'
+  vector:
+    image: timberio/vector:0.54.0-alpine
+    profiles: ["siem"]
+    command: ["--config", "/etc/vector/vector.yaml"]
+    volumes:
+      - ./docker/vector/vector.yaml:/etc/vector/vector.yaml:ro
+      - vector_data:/var/lib/vector
+    ports:
+      - "127.0.0.1:${VECTOR_PORT:-8686}:8686"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8686/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  audit-shipper:
+    build: .
+    profiles: ["siem"]
+    command: ["python", "manage.py", "stream_audit_log", "--interval", "5"]
+    healthcheck:
+      disable: true  # a worker, not a web server: the image's HTTP check does not apply
+    environment:
+      <<: *app-env
+      AUDIT_SIEM_URL: http://vector:9000/audit
+      AUDIT_SIEM_SECRET: ${AUDIT_SIEM_SECRET:-compose-local-siem-secret-change-me}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      vector:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
 volumes:
   pgdata:
+  vector_data:

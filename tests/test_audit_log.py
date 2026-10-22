@@ -35,8 +35,15 @@ def test_bulk_create_cannot_upsert_over_existing_entries(world: World) -> None:
             [forged], update_conflicts=True, unique_fields=["id"], update_fields=["action"]
         )
     assert AuditLog.objects.get(pk=world.audit_a.pk).action == AuditAction.USER_ROLE_CHANGED
-    # Plain appends still work.
-    assert len(AuditLog.objects.bulk_create([AuditLog(action=AuditAction.LOGOUT)])) == 1
+
+
+def test_events_are_appended_only_through_the_chained_record(world: World) -> None:
+    """A bulk insert or a bare save() would skip the hash chain (ADR 0006)."""
+    with pytest.raises(AuditLogImmutableError, match="record"):
+        AuditLog.objects.bulk_create([AuditLog(action=AuditAction.LOGOUT)])
+    with pytest.raises(AuditLogImmutableError, match="record"):
+        AuditLog.objects.create(action=AuditAction.LOGOUT)
+    assert record(AuditAction.LOGOUT).chain_seq == 1
 
 
 def test_entries_cannot_be_deleted_through_the_orm(world: World) -> None:

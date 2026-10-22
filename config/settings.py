@@ -157,6 +157,15 @@ SSO_HTTP_TIMEOUT_SECONDS: float = env.float("SSO_HTTP_TIMEOUT_SECONDS", default=
 # IdP URLs must be HTTPS. Allow plain HTTP only for a local IdP (the compose Keycloak).
 SSO_ALLOW_HTTP: bool = env.bool("SSO_ALLOW_HTTP", default=False)
 
+# Audit log integrity and streaming (ADR 0006). The chain key signs every audit
+# event's hash; keep it stable and secret (derived from SECRET_KEY when unset).
+AUDIT_CHAIN_KEY: str = env.str("AUDIT_CHAIN_KEY", default="")
+AUDIT_SIEM_URL: str = env.str("AUDIT_SIEM_URL", default="")
+AUDIT_SIEM_SECRET: str = env.str("AUDIT_SIEM_SECRET", default="")
+AUDIT_SIEM_BATCH_SIZE: int = env.int("AUDIT_SIEM_BATCH_SIZE", default=500)
+AUDIT_SIEM_TIMEOUT_SECONDS: float = env.float("AUDIT_SIEM_TIMEOUT_SECONDS", default=5.0)
+AUDIT_SIEM_MAX_ATTEMPTS: int = env.int("AUDIT_SIEM_MAX_ATTEMPTS", default=5)
+
 # Per-account sign-in throttling (ADR 0003): free attempts, then a doubling delay.
 LOGIN_ACCOUNT_FREE_ATTEMPTS: int = env.int("LOGIN_ACCOUNT_FREE_ATTEMPTS", default=5)
 LOGIN_ACCOUNT_BASE_DELAY_SECONDS: int = env.int("LOGIN_ACCOUNT_BASE_DELAY_SECONDS", default=2)

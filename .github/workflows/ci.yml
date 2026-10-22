@@ -159,12 +159,22 @@ jobs:
           if docker compose run --rm --no-deps -e DATABASE_URL=postgres://app_owner:app_owner@db:5432/app               api python manage.py shell -c 'from apps.accounts.models import User; User.objects.count()'; then
             echo "the owner role was accepted" >&2; exit 1
           fi
+      - name: Audit log streamed to a SIEM (Vector), chains verified, partitions ahead
+        run: |
+          set -euo pipefail
+          docker compose --profile siem up -d --wait vector audit-shipper
+          docker compose --profile siem run --rm audit-shipper python manage.py stream_audit_log --once
+          docker compose --profile siem exec -T vector sh -c 'cat /var/lib/vector/audit/*.ndjson' > siem.ndjson
+          grep -q '"action":"auth.login_succeeded"' siem.ndjson
+          grep -q '"hash":"' siem.ndjson
+          docker compose exec -T api python manage.py verify_audit_chain
+          docker compose run --rm migrate python manage.py audit_partitions --months-ahead 3
       - name: Container logs
         if: failure()
         run: docker compose logs
       - name: Tear down
         if: always()
-        run: docker compose down -v
+        run: docker compose --profile siem down -v
 
   sso-e2e:
     name: SSO end to end (Keycloak)

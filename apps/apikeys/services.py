@@ -49,6 +49,7 @@ def _issue(
     rotated_from: ApiKey | None = None,
 ) -> tuple[ApiKey, str]:
     prefix, secret, full = _mint()
+    now = timezone.now()
     key = ApiKey.objects.create(
         organization=organization,
         name=name,
@@ -56,7 +57,8 @@ def _issue(
         secret_hash=hash_secret(secret),
         scopes=sorted(set(scopes)),
         created_by=actor,
-        expires_at=timezone.now() + timedelta(days=days),
+        created_at=now,
+        expires_at=now + timedelta(days=days),
         rotated_from=rotated_from,
     )
     return key, full
