@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="{% static 'web/css/tokens.css' %}">
   <link rel="stylesheet" href="{% static 'web/css/site.css' %}">
   <script src="{% static 'web/js/site.js' %}" defer></script>
+  <script src="{% static 'web/js/story.js' %}" defer></script>
 </head>
 <body>
 {% include "web/_icons.html" %}
@@ -111,7 +112,12 @@
     <div class="wrap-wide">
       <div class="section-head center reveal">
         <p class="eyebrow">Isolation</p>
-        <h2 class="t-section" id="isolation-title">Every request takes the same path.</h2>
+        <h2 class="t-section" id="isolation-title">A foreign ID finds nothing.</h2>
+        <p class="t-lead">Follow one request from Acme&rsquo;s admin for a Globex user, through the code that keeps every tenant sealed.</p>
+      </div>
+      {% include "web/_story.html" %}
+      <div class="section-head center subsection-head reveal">
+        <h3 class="t-subsection">Every request takes the same path.</h3>
         <p class="t-lead"><code class="inline">TenantScopedViewSet</code> assembles the layers, so no view can forget one. Rows from another tenant are filtered out before a handler ever sees them.</p>
       </div>
       {% include "web/_pipeline.html" %}

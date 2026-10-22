@@ -1,6 +1,6 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/hero-dark.svg">
-  <img alt="Secure Multi-Tenant Platform. Every tenant, sealed: Alice from Acme asks for a Globex user and gets 404, the same as a random ID. Fail-closed tenant isolation for Django REST Framework, proven by 274 tests." src="docs/hero-light.svg" width="100%">
+  <img alt="Secure Multi-Tenant Platform. Every tenant, sealed: Alice from Acme asks for a Globex user and gets 404, the same as a random ID. Fail-closed tenant isolation for Django REST Framework, proven by 281 tests." src="docs/hero-light.svg" width="100%">
 </picture>
 
 # Secure Multi-Tenant Platform
@@ -86,6 +86,29 @@ when the suite and the page disagree. The core content needs no JavaScript.
   <img alt="Landing page: Every tenant. Sealed. Acme Corp is Alice's tenant; Globex Inc is sealed from her." src="docs/screenshots/landing-light.png">
 </picture>
 
+The **Isolation** section follows one request from Acme's admin for a Globex user through
+four steps: request, tenant resolve, scoped query, 404. On wide screens the diagram stays
+pinned while the steps scroll past, and each step draws its part of the request path. The
+motion is CSS scroll-driven animation inside `@supports`; browsers without scroll timelines
+get the same build from a small same-origin script (`apps/web/static/web/js/story.js`). With
+reduced motion, or with neither scroll timelines nor JavaScript, the diagram is shown
+complete. Its labels are checked against the code: `test_the_story_shows_what_the_api_really_does`
+compares the figure's 404 body with a real cross-tenant request and its `WHERE` clause with
+the SQL that `visible_to()` produces.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/landing-story-dark.png">
+  <img alt="The isolation story, complete: GET a Globex user's ID as Alice; TenantJWTAuthentication resolves her tenant, Acme Corp, from the database; visible_to(alice) adds Acme's ID to the WHERE clause and finds 0 rows; 404 Not Found, the same as a random ID." src="docs/screenshots/landing-story-light.png">
+</picture>
+
+<details>
+<summary>The story as you scroll (GIF, 0.6 MB)</summary>
+
+<img alt="Scrolling through the isolation story: each step draws its part of the request path, ending in 404 Not Found." src="docs/screenshots/landing-story.gif" width="720">
+</details>
+
+Under the story, the whole path every request takes, with the 401 and 403 exits:
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/landing-isolation-dark.png">
   <img alt="Landing page diagram: every request passes context, authentication, role authorization, row scoping, then the service layer and audit log; failures return 401, 403 or 404." src="docs/screenshots/landing-isolation-light.png">
@@ -111,7 +134,8 @@ Font License) from `apps/web/static/web/fonts/`.
   CSRF failures, and 429 for a throttled admin sign-in. Under `/api/` they are JSON
   (`{"detail": "Not found."}`), like every other API response.
 - **The Django admin** wears the same slate and teal in both themes, with the product mark,
-  hit areas of at least 24px and no layout shift when its sidebar restores itself.
+  hit areas of at least 24px and no layout shift when its sidebar restores itself or its
+  fonts swap in.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/redoc-dark.png">
@@ -404,7 +428,7 @@ DATABASE_URL=postgres://app:app@localhost:5432/app uv run pytest --cov   # what 
 uv run ruff check . && uv run ruff format --check . && uv run mypy .
 ```
 
-The suite has 274 tests and 97% branch coverage (the gate is 90%). It runs against
+The suite has 281 tests and 97% branch coverage (the gate is 90%). It runs against
 PostgreSQL in CI.
 
 | File | Focus |
@@ -415,10 +439,10 @@ PostgreSQL in CI.
 | `test_auth.py` | Login auditing, rotation and blacklist (including racing refreshes), logout(-all), deactivation and reactivation, throttling that a forged `X-Forwarded-For` can't dodge, password change |
 | `test_invitations.py` | Lifecycle, expiry, revocation, single use, weak passwords, sign-up races, enumeration resistance |
 | `test_audit_log.py` | Immutability (ORM, bulk upserts and PostgreSQL trigger), context capture, filters, cursor pagination |
-| `test_admin.py` | The Django admin: throttled and audited sign-in, sessions that end with logout-all and password changes, stored tokens never shown, no un-revoking, audited tenant changes, every page under the strict CSP |
+| `test_admin.py` | The Django admin: throttled and audited sign-in, sessions that end with logout-all and password changes, stored tokens never shown, no un-revoking, audited tenant changes, every page under the strict CSP, fonts that swap in without moving the layout |
 | `test_users_and_organizations.py` | Role changes, soft deactivation, slugs, uniqueness, DB check constraints |
 | `test_platform.py` | Health probes, OpenAPI schema (zero warnings, validated), request IDs, JSON logs, secure settings, `seed_demo` |
-| `test_web.py` | Landing page facts rendered from code, degraded status, no inline code or third-party assets, the CSP on every response, Swagger deep links and plugin order, the patched Redoc bundle, error pages (HTML and JSON), and the landing page's test inventory |
+| `test_web.py` | Landing page facts rendered from code, degraded status, no inline code or third-party assets, the CSP on every response, Swagger deep links and plugin order, the patched Redoc bundle, error pages (HTML and JSON), the isolation story (complete without JavaScript, true to the API's real 404 and SQL, animated only without reduced motion) and the landing page's test inventory |
 
 CI (`.github/workflows/ci.yml`) has four jobs. **lint** runs ruff, mypy (strict, with
 django-stubs and DRF stubs), the migration drift check and `check --deploy`. **test** runs

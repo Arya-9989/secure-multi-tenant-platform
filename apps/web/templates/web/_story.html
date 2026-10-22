@@ -1,0 +1,130 @@
+{% comment %}One foreign-ID request, told in four steps. The figure is drawn complete in the
+   markup; site.css and story.js only build it up in step with the scroll (see the
+   "story" block in site.css). Every label mirrors the code it names:
+   TenantJWTAuthentication.get_user, HasRolePermission, TenantQuerySet.visible_to
+   and DRF's get_object, as exercised by test_unknown_and_foreign_ids_are_indistinguishable.{% endcomment %}
+<div class="story" data-story>
+  <figure class="story-stage">
+    <svg class="story-svg" viewBox="0 0 360 520" role="img" aria-labelledby="story-svg-title story-svg-desc" xmlns="http://www.w3.org/2000/svg">
+      <title id="story-svg-title">The path of a request for another tenant&rsquo;s user</title>
+      <desc id="story-svg-desc">Alice, an admin at Acme Corp, asks for the ID of a Globex user. TenantJWTAuthentication verifies her token and loads her row, which resolves her tenant, Acme Corp, from the database. visible_to(alice) limits the query to Acme&rsquo;s rows, so the lookup for Grace&rsquo;s ID returns zero rows while Globex stays sealed. The answer is 404 Not Found, with the same body a random ID gets.</desc>
+      <defs>
+        <pattern id="story-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <rect class="d-hatch" width="2" height="6"/>
+        </pattern>
+      </defs>
+
+      <g class="sx sx-1">
+        <rect class="d-node" x="0.5" y="0.5" width="359" height="63" rx="16"/>
+        <text class="d-code-lg" x="16" y="27"><tspan class="d-verb">GET</tspan> /api/v1/users/{grace&rsquo;s id}/</text>
+        <text class="d-text" x="16" y="48">alice@acme.test, with a valid access token</text>
+      </g>
+      <path class="d-flow d-draw sx-l1" d="M180 64V88" pathLength="1"/>
+      <path class="d-arrow sx-a1" d="M180 96l-4.5-7.5h9z"/>
+
+      <g class="sx sx-2">
+        <rect class="d-node" x="0.5" y="96.5" width="359" height="83" rx="16"/>
+        <text class="d-code" x="16" y="122">TenantJWTAuthentication</text>
+        <text class="d-text" x="16" y="146">Loads alice&rsquo;s row from the database.</text>
+        <text class="d-text" x="16" y="165">Tenant and role come from it, not the token.</text>
+      </g>
+      <g class="sx sx-chip">
+        <rect class="d-chip" x="262" y="107" width="84" height="24" rx="12"/>
+        <text class="d-chip-text" x="304" y="123.5" text-anchor="middle">Acme Corp</text>
+      </g>
+      <path class="d-flow d-draw sx-l2" d="M180 180V188Q180 194 174 194H98Q92 194 92 200V202" pathLength="1"/>
+      <path class="d-arrow sx-a2" d="M92 210l-4.5-7.5h9z"/>
+
+      <g class="story-tenant">
+        <rect class="d-space" x="0.5" y="210.5" width="171" height="117" rx="18"/>
+        <rect class="d-mark-own" x="14" y="224" width="24" height="24" rx="7"/>
+        <text class="d-mark-own-text" x="26" y="240.5" text-anchor="middle">A</text>
+        <text class="d-title-sm" x="46" y="241">Acme Corp</text>
+        <path class="d-rule" d="M14 258.5H158M14 292.5H158"/>
+        <circle class="d-avatar" cx="25" cy="275.5" r="9"/>
+        <text class="d-row" x="42" y="279.5">alice@acme.test</text>
+        <circle class="d-avatar" cx="25" cy="309.5" r="9"/>
+        <text class="d-row" x="42" y="313.5">bob@acme.test</text>
+      </g>
+      <g class="story-tenant">
+        <rect class="d-space" x="188.5" y="210.5" width="171" height="117" rx="18"/>
+        <rect class="d-mark" x="202" y="224" width="24" height="24" rx="7"/>
+        <text class="d-mark-text" x="214" y="240.5" text-anchor="middle">G</text>
+        <text class="d-title-sm" x="234" y="241">Globex Inc</text>
+        <use class="d-lock-small" href="#i-lock" x="332" y="227" width="14" height="14"/>
+        <path class="d-rule" d="M202 258.5H346M202 292.5H346"/>
+        <g class="story-redacted">
+          <circle class="d-redacted" cx="213" cy="275.5" r="9"/>
+          <rect class="d-redacted" x="230" y="268" width="64" height="6" rx="3"/>
+          <rect class="d-redacted" x="230" y="279" width="96" height="5" rx="2.5"/>
+          <circle class="d-redacted" cx="213" cy="309.5" r="9"/>
+          <rect class="d-redacted" x="230" y="302" width="54" height="6" rx="3"/>
+          <rect class="d-redacted" x="230" y="313" width="88" height="5" rx="2.5"/>
+        </g>
+      </g>
+      <path class="d-scope d-draw sx-scope" d="M92 211H153A18 18 0 0 1 171 229V309A18 18 0 0 1 153 327H19A18 18 0 0 1 1 309V229A18 18 0 0 1 19 211Z" pathLength="1"/>
+      <g class="sx sx-seal">
+        <circle class="d-seal" cx="180" cy="269" r="14"/>
+        <use class="d-lock" href="#i-lock" x="173" y="262" width="14" height="14"/>
+      </g>
+
+      <path class="d-flow d-draw sx-l3" d="M92 328V340" pathLength="1"/>
+      <path class="d-arrow sx-a3" d="M92 348l-4.5-7.5h9z"/>
+      <g class="sx sx-3">
+        <rect class="d-sql" x="0.5" y="348.5" width="359" height="75" rx="14"/>
+        <text class="d-code d-accent" x="16" y="372">visible_to(alice)</text>
+        <text class="d-row" x="16" y="393">WHERE organization_id = {acme&rsquo;s id}</text>
+        <text class="d-row" x="16" y="411">AND id = {grace&rsquo;s id}</text>
+        <text class="d-count" x="344" y="411" text-anchor="end">0 rows</text>
+      </g>
+      <path class="d-flow d-draw sx-l4" d="M180 424V446" pathLength="1"/>
+      <path class="d-arrow sx-a4" d="M180 454l-4.5-7.5h9z"/>
+
+      <g class="sx sx-4">
+        <rect class="d-node-key" x="0.5" y="454.5" width="359" height="64" rx="16"/>
+        <text class="d-status" x="16" y="481">404 Not Found</text>
+        <text class="d-text" x="344" y="481" text-anchor="end">Same as a random ID</text>
+        <text class="d-row" x="16" y="503">{"detail": "No User matches the given query."}</text>
+      </g>
+    </svg>
+  </figure>
+
+  <ol class="story-steps">
+    <li class="story-step">
+      <span class="story-mark" aria-hidden="true"></span>
+      <div class="story-copy reveal">
+        <p class="story-kicker"><span class="story-num">01</span>Request</p>
+        <h3 class="t-tile">Alice asks for Grace.</h3>
+        <p class="t-body">Acme&rsquo;s admin sends <code class="inline">GET /api/v1/users/{id}/</code> with a valid token and the ID of a Globex user. The ID is real: Grace&rsquo;s row sits in the same table as Alice&rsquo;s.</p>
+        <p class="story-ref"><span>In the code</span><code>UserViewSet</code></p>
+      </div>
+    </li>
+    <li class="story-step">
+      <span class="story-mark" aria-hidden="true"></span>
+      <div class="story-copy reveal">
+        <p class="story-kicker"><span class="story-num">02</span>Tenant resolve</p>
+        <h3 class="t-tile">The tenant comes from the database.</h3>
+        <p class="t-body"><code class="inline">TenantJWTAuthentication</code> checks the signature, audience and issuer, then loads Alice&rsquo;s row and her organization. A revoked token or an inactive tenant ends the request here with <code class="inline">401</code>. Role and tenant are never read from token claims.</p>
+        <p class="story-ref"><span>In the code</span><code>TenantJWTAuthentication.get_user</code></p>
+      </div>
+    </li>
+    <li class="story-step">
+      <span class="story-mark" aria-hidden="true"></span>
+      <div class="story-copy reveal">
+        <p class="story-kicker"><span class="story-num">03</span>Scoped query</p>
+        <h3 class="t-tile">Only Acme&rsquo;s rows exist.</h3>
+        <p class="t-body"><code class="inline">HasRolePermission</code> confirms her role may view users. Then every lookup runs through <code class="inline">visible_to(alice)</code>, which adds Acme&rsquo;s ID to the <code class="inline">WHERE</code> clause. Grace&rsquo;s ID is looked up inside that filter, and the database returns zero rows.</p>
+        <p class="story-ref"><span>In the code</span><code>TenantQuerySet.visible_to</code></p>
+      </div>
+    </li>
+    <li class="story-step">
+      <span class="story-mark" aria-hidden="true"></span>
+      <div class="story-copy reveal">
+        <p class="story-kicker"><span class="story-num">04</span>404 Not Found</p>
+        <h3 class="t-tile">Not forbidden. Absent.</h3>
+        <p class="t-body">With no row to return, the view answers <code class="inline">404</code> with the same body a random UUID gets, so the response confirms nothing. <code class="inline">TenantObjectPermission</code> stands behind it and also answers 404, should a view ever skip the scoping.</p>
+        <p class="story-ref"><span>Proven by</span><code>test_<wbr>unknown_<wbr>and_<wbr>foreign_<wbr>ids_<wbr>are_<wbr>indistinguishable</code></p>
+      </div>
+    </li>
+  </ol>
+</div>

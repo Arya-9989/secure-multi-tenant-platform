@@ -232,3 +232,23 @@ def test_every_admin_page_works_under_the_strict_csp(world: World, operator: Cli
         assert not inline, f"{page}: inline script {inline}"
         assert not re.search(r"<[a-z][^>]*\sstyle=", html), f"{page}: inline style attribute"
         assert not re.search(r"<[a-z][^>]*\son[a-z]+=", html), f"{page}: inline event handler"
+
+
+def test_admin_fonts_swap_in_without_moving_the_layout(operator: Client) -> None:
+    """The web font is preloaded, and its fallback is metric-matched, on every admin page."""
+    html = operator.get(reverse("admin:auditlogs_auditlog_changelist")).content.decode()
+    assert re.search(
+        r'<link rel="preload" href="/static/web/fonts/InterVariable-opsz-latin\.woff2"'
+        r' as="font" type="font/woff2" crossorigin>',
+        html,
+    )
+
+    css = (settings.BASE_DIR / "apps/web/static/web/css/admin.css").read_text()
+    stacks = dict(re.findall(r"--font-family-(primary|monospace): ([^;]+);", css))
+    assert stacks["primary"].startswith('"Inter Variable", "Inter Fallback",')
+    assert stacks["monospace"].startswith('"JetBrains Mono Variable", "JetBrains Mono Fallback",')
+    for family in ("Inter Fallback", "JetBrains Mono Fallback"):
+        face = re.search(r'@font-face \{\s*font-family: "' + family + r'";([^}]*)\}', css)
+        assert face, family
+        assert "size-adjust" in face.group(1)
+        assert "ascent-override" in face.group(1)

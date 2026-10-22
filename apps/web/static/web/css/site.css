@@ -443,6 +443,92 @@ code.inline {
 .legend-swatch { width: 24px; height: 0; border-top: 1.5px solid var(--accent); }
 .legend-swatch-reject { border-top: 1.5px dashed var(--ink-3); }
 
+/* ----------------------------------------------------------------- isolation story */
+/* One foreign-ID request in four steps. The figure is complete in the markup, so
+   without scroll timelines, without JavaScript or with reduced motion it reads as
+   a finished diagram beside four short steps. On wide screens the figure stays
+   pinned while the steps scroll past it. */
+.t-subsection {
+  font-size: clamp(28px, 3.4vw, 40px);
+  line-height: 1.1;
+  font-weight: 650;
+  letter-spacing: 0;
+  text-wrap: balance;
+}
+.subsection-head { margin-top: clamp(96px, 12vw, 160px); }
+
+.story { position: relative; display: grid; gap: 48px; }
+.story-stage { width: min(100%, 440px); margin-inline: auto; }
+.story-svg { width: 100%; height: auto; overflow: visible; }
+.story-steps { display: grid; gap: 40px; }
+.story-copy { display: grid; gap: 12px; max-width: 520px; }
+.story-kicker { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; letter-spacing: -0.016em; color: var(--accent-ink); }
+.story-num {
+  display: inline-grid;
+  place-items: center;
+  min-width: 30px; height: 22px;
+  padding: 0 7px;
+  border-radius: 980px;
+  background: var(--accent-soft);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.story-copy .t-body { font-size: 17px; }
+.story-ref { display: grid; gap: 4px; margin-top: 6px; padding-top: 14px; border-top: 1px solid var(--hairline); font-size: 13px; color: var(--ink-3); letter-spacing: -0.01em; }
+.story-ref code { color: var(--ink); font-size: 12px; overflow-wrap: anywhere; }
+
+/* Scroll markers: zero-height points whose position drives the build of the figure.
+   On narrow screens they sit at fixed fractions of the figure's height (margin
+   percentages resolve against the width, and the figure's aspect ratio is fixed). */
+.story-mark { position: absolute; left: 0; top: 0; width: 1px; height: 1px; pointer-events: none; }
+.story-step:nth-child(2) .story-mark { margin-top: calc(min(100%, 440px) * 0.2167); }
+.story-step:nth-child(3) .story-mark { margin-top: calc(min(100%, 440px) * 0.4333); }
+.story-step:nth-child(4) .story-mark { margin-top: calc(min(100%, 440px) * 0.65); }
+
+@media (min-width: 900px) {
+  .story { grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr); column-gap: clamp(40px, 6vw, 96px); align-items: start; }
+  .story-stage {
+    grid-column: 2;
+    grid-row: 1;
+    position: sticky;
+    top: 52px;
+    width: 100%;
+    height: calc(100vh - 52px);
+    display: grid;
+    place-items: center;
+  }
+  .story-svg { width: auto; max-width: 100%; max-height: calc(100vh - 52px - 64px); }
+  .story-steps { grid-column: 1; grid-row: 1; gap: 0; padding-bottom: 16vh; }
+  .story-step { position: relative; min-height: calc(88vh - 52px); display: grid; align-content: center; }
+  .story-step:nth-child(n) .story-mark { top: 50%; margin-top: 0; }
+}
+
+.d-status { fill: var(--ink); font-family: var(--font-mono); font-size: 13px; font-weight: 600; }
+.d-code-lg { fill: var(--ink); font-family: var(--font-mono); font-size: 13px; }
+.d-verb { fill: var(--accent-ink); font-weight: 600; }
+.d-accent { fill: var(--accent-ink); font-weight: 600; }
+.d-chip { fill: var(--accent-soft); stroke: var(--accent-line); stroke-width: 1; }
+.d-chip-text { fill: var(--accent-ink); font-size: 12px; font-weight: 600; letter-spacing: -0.01em; }
+.d-space { fill: var(--bg-elev); stroke: var(--hairline-strong); stroke-width: 1; }
+.d-scope { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+.d-mark-own { fill: var(--accent); }
+.d-mark-own-text { fill: var(--on-accent); font-size: 12px; font-weight: 650; }
+.d-mark { fill: var(--bg-sunk); }
+.d-mark-text { fill: var(--ink); font-size: 12px; font-weight: 650; }
+.d-title-sm { fill: var(--ink); font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+.d-rule { stroke: var(--hairline); stroke-width: 1; fill: none; }
+.d-avatar { fill: var(--bg-sunk); }
+.d-row { fill: var(--ink-2); font-family: var(--font-mono); font-size: 11px; }
+.d-hatch { fill: var(--hairline-strong); }
+.d-redacted { fill: url(#story-hatch); }
+.d-lock-small { color: var(--ink-3); }
+.d-seal { fill: var(--bg-elev); stroke: var(--hairline-strong); stroke-width: 1; }
+.d-lock { color: var(--ink); }
+.d-sql { fill: var(--bg-sunk); stroke: var(--hairline); stroke-width: 1; }
+.d-count { fill: var(--ink); font-family: var(--font-mono); font-size: 11.5px; font-weight: 600; }
+
 /* ----------------------------------------------------------------- tiles */
 .tiles { display: grid; gap: 12px; }
 @media (min-width: 760px) {
@@ -648,6 +734,62 @@ code.inline {
     animation: pulse 2.4s var(--ease) 2;
   }
 }
+/* The isolation story builds its figure step by step: each step's marker crossing
+   from 85% to 50% of the viewport draws that step's part of the request path.
+   Native scroll timelines where supported; story.js drives the same values
+   (--p1 to --p4) where they are not. Reduced motion keeps the finished figure. */
+@media (prefers-reduced-motion: no-preference) {
+  .sx-chip, .sx-seal { transform-box: fill-box; transform-origin: center; }
+
+  @supports (animation-timeline: view()) and (timeline-scope: --a) {
+    .story:not(.js-scrub) { timeline-scope: --s1, --s2, --s3, --s4; }
+    .story:not(.js-scrub) .story-step:nth-child(1) .story-mark { view-timeline: --s1 block; }
+    .story:not(.js-scrub) .story-step:nth-child(2) .story-mark { view-timeline: --s2 block; }
+    .story:not(.js-scrub) .story-step:nth-child(3) .story-mark { view-timeline: --s3 block; }
+    .story:not(.js-scrub) .story-step:nth-child(4) .story-mark { view-timeline: --s4 block; }
+    .story:not(.js-scrub) .d-draw { stroke-dasharray: 1 2; }
+    .story:not(.js-scrub) .sx-1 { animation: sx-in linear both; animation-timeline: --s1; animation-range: cover 15% cover 36%; }
+    .story:not(.js-scrub) .sx-l1 { animation: sx-draw linear both; animation-timeline: --s1; animation-range: cover 32.5% cover 46.5%; }
+    .story:not(.js-scrub) .sx-a1 { animation: sx-fade linear both; animation-timeline: --s1; animation-range: cover 44.75% cover 50%; }
+    .story:not(.js-scrub) .sx-2 { animation: sx-in linear both; animation-timeline: --s2; animation-range: cover 15% cover 32.5%; }
+    .story:not(.js-scrub) .sx-chip { animation: sx-pop linear both; animation-timeline: --s2; animation-range: cover 29% cover 39.5%; }
+    .story:not(.js-scrub) .sx-l2 { animation: sx-draw linear both; animation-timeline: --s2; animation-range: cover 36% cover 48.25%; }
+    .story:not(.js-scrub) .sx-a2 { animation: sx-fade linear both; animation-timeline: --s2; animation-range: cover 46.5% cover 50%; }
+    .story:not(.js-scrub) .sx-scope { animation: sx-draw linear both; animation-timeline: --s3; animation-range: cover 15% cover 30.75%; }
+    .story:not(.js-scrub) .sx-seal { animation: sx-pop linear both; animation-timeline: --s3; animation-range: cover 25.5% cover 36%; }
+    .story:not(.js-scrub) .sx-l3 { animation: sx-draw linear both; animation-timeline: --s3; animation-range: cover 30.75% cover 36%; }
+    .story:not(.js-scrub) .sx-a3 { animation: sx-fade linear both; animation-timeline: --s3; animation-range: cover 34.25% cover 37.75%; }
+    .story:not(.js-scrub) .sx-3 { animation: sx-in linear both; animation-timeline: --s3; animation-range: cover 34.25% cover 46.5%; }
+    .story:not(.js-scrub) .sx-l4 { animation: sx-draw linear both; animation-timeline: --s4; animation-range: cover 15% cover 25.5%; }
+    .story:not(.js-scrub) .sx-a4 { animation: sx-fade linear both; animation-timeline: --s4; animation-range: cover 23.75% cover 27.25%; }
+    .story:not(.js-scrub) .sx-4 { animation: sx-in linear both; animation-timeline: --s4; animation-range: cover 25.5% cover 44.75%; }
+  }
+
+  /* Fallback, enabled by story.js only once it has computed the progress values. */
+  .story.js-scrub .sx-1 { --t: clamp(0, var(--p1) / 0.6, 1); }
+  .story.js-scrub .sx-l1 { --t: clamp(0, (var(--p1) - 0.5) / 0.4, 1); }
+  .story.js-scrub .sx-a1 { --t: clamp(0, (var(--p1) - 0.85) / 0.15, 1); }
+  .story.js-scrub .sx-2 { --t: clamp(0, var(--p2) / 0.5, 1); }
+  .story.js-scrub .sx-chip { --t: clamp(0, (var(--p2) - 0.4) / 0.3, 1); }
+  .story.js-scrub .sx-l2 { --t: clamp(0, (var(--p2) - 0.6) / 0.35, 1); }
+  .story.js-scrub .sx-a2 { --t: clamp(0, (var(--p2) - 0.9) / 0.1, 1); }
+  .story.js-scrub .sx-scope { --t: clamp(0, var(--p3) / 0.45, 1); }
+  .story.js-scrub .sx-seal { --t: clamp(0, (var(--p3) - 0.3) / 0.3, 1); }
+  .story.js-scrub .sx-l3 { --t: clamp(0, (var(--p3) - 0.45) / 0.15, 1); }
+  .story.js-scrub .sx-a3 { --t: clamp(0, (var(--p3) - 0.55) / 0.1, 1); }
+  .story.js-scrub .sx-3 { --t: clamp(0, (var(--p3) - 0.55) / 0.35, 1); }
+  .story.js-scrub .sx-l4 { --t: clamp(0, var(--p4) / 0.3, 1); }
+  .story.js-scrub .sx-a4 { --t: clamp(0, (var(--p4) - 0.25) / 0.1, 1); }
+  .story.js-scrub .sx-4 { --t: clamp(0, (var(--p4) - 0.3) / 0.55, 1); }
+  .story.js-scrub .d-draw { stroke-dasharray: 1 2; stroke-dashoffset: calc(1 - var(--t)); }
+  .story.js-scrub .sx { opacity: var(--t); transform: translateY(calc((1 - var(--t)) * 14px)); }
+  .story.js-scrub .sx-chip, .story.js-scrub .sx-seal { transform: scale(calc(0.6 + 0.4 * var(--t))); }
+  .story.js-scrub :is(.sx-a1, .sx-a2, .sx-a3, .sx-a4) { opacity: var(--t); }
+}
+@keyframes sx-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes sx-pop { from { opacity: 0; transform: scale(0.6); } to { opacity: 1; transform: none; } }
+@keyframes sx-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes sx-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 @keyframes reveal { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }
 @keyframes grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes pulse { 0% { transform: scale(1); opacity: 0.55; } 70%, 100% { transform: scale(2.6); opacity: 0; } }

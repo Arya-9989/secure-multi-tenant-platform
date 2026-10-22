@@ -36,7 +36,7 @@ TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
     ),
     SuiteFile(
         "test_web.py",
-        29,
+        35,
         "This page, the API docs, error pages and the Content Security Policy",
     ),
     SuiteFile(
@@ -66,7 +66,7 @@ TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
     ),
     SuiteFile(
         "test_admin.py",
-        10,
+        11,
         "The Django admin: throttled, audited, no live tokens, strict CSP",
     ),
 )
