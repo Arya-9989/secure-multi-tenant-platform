@@ -56,7 +56,7 @@ TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
     ),
     SuiteFile(
         "test_invitations.py",
-        14,
+        15,
         "Lifecycle, expiry, single use, sign-up races, enumeration resistance",
     ),
     SuiteFile(

@@ -19,7 +19,7 @@ from django.conf import settings
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.mail import send_mail
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import F, QuerySet
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -325,7 +325,12 @@ def accept_invitation(*, raw_token: str, password: str, full_name: str = "") -> 
         )
         _validate_password(password, user)
         user.set_password(password)
-        user.save()
+        try:
+            with transaction.atomic():
+                user.save()
+        except IntegrityError as exc:
+            # Another transaction registered this address after the check above.
+            raise invalid from exc
         invitation.accepted_at, invitation.accepted_user = timezone.now(), user
         invitation.save(update_fields=["accepted_at", "accepted_user"])
         record(

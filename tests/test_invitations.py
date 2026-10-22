@@ -9,10 +9,11 @@ from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APIClient
 
+from apps.accounts import services
 from apps.accounts.models import Invitation, InvitationStatus, User, hash_invitation_token
 from apps.accounts.roles import Role
 from apps.auditlogs.models import AuditAction, AuditLog
-from tests.conftest import ClientFactory, World
+from tests.conftest import PASSWORD, ClientFactory, World
 
 pytestmark = pytest.mark.django_db
 
@@ -179,3 +180,31 @@ def test_email_failure_does_not_break_invitation(
         response = invite(client_for(world.admin_a), "offline@a.test")
     assert response.status_code == 201
     assert Invitation.objects.filter(email="offline@a.test").exists()
+
+
+def test_a_signup_race_for_the_same_email_fails_generically(
+    world: World,
+    client_for: ClientFactory,
+    api_client: APIClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Another transaction registers the address between our check and our insert.
+
+    The unique constraint catches it; the caller must get the generic error, not a 500.
+    """
+    token = invite(client_for(world.admin_a), "racer@a.test").json()["token"]
+    validate = services._validate_password
+
+    def register_concurrently(password: str, user: User) -> None:
+        User.objects.create_user(
+            "racer@a.test", PASSWORD, role=Role.MEMBER, organization=world.org_b
+        )
+        validate(password, user)
+
+    monkeypatch.setattr(services, "_validate_password", register_concurrently)
+    response = api_client.post(ACCEPT, {"token": token, "password": STRONG})
+
+    assert response.status_code == 400
+    assert response.json() == {"token": [services.INVALID_INVITATION]}
+    invitation = Invitation.objects.get(email="racer@a.test")
+    assert invitation.status == InvitationStatus.PENDING
