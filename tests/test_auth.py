@@ -8,6 +8,7 @@ from django.test import override_settings
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken
 
+from apps.accounts.authentication import TenantRefreshToken
 from apps.accounts.models import User
 from apps.auditlogs.models import AuditAction, AuditLog
 from tests.conftest import PASSWORD, World, forge_token, token_claims
@@ -207,6 +208,19 @@ def test_behind_a_trusted_proxy_the_throttle_keys_on_the_address_it_appended(
     other = {"HTTP_X_FORWARDED_FOR": "198.51.100.8"}
     assert login(api_client, "member@a.test", **other).status_code == 200
     assert AuditLog.objects.filter(ip_address="198.51.100.8").exists()
+
+
+def test_a_refresh_token_is_redeemed_once_even_when_requests_race(
+    world: World, api_client: APIClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two concurrent refreshes can both pass the blacklist read before either
+    writes. The claim itself must be atomic, so only one of them wins."""
+    tokens = login(api_client, "member@a.test").json()
+    monkeypatch.setattr(TenantRefreshToken, "check_blacklist", lambda self: None)
+
+    assert api_client.post(REFRESH, {"refresh": tokens["refresh"]}).status_code == 200
+    replay = api_client.post(REFRESH, {"refresh": tokens["refresh"]})
+    assert replay.status_code == 401
 
 
 # ---------------------------------------------------------------- profile & password

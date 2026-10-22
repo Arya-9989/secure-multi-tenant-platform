@@ -2,14 +2,18 @@ from __future__ import annotations
 
 from typing import Any
 
+from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
+from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.serializers import (
     TokenObtainPairSerializer,
     TokenRefreshSerializer,
 )
 from rest_framework_simplejwt.settings import api_settings
+from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
+from rest_framework_simplejwt.utils import datetime_from_epoch
 
 from apps.accounts.authentication import (
     TenantRefreshToken,
@@ -42,7 +46,30 @@ class RefreshSerializer(TokenRefreshSerializer):
             raise AuthenticationFailed(
                 self.error_messages["no_active_account"], "no_active_account"
             )
-        return super().validate(attrs)
+        with transaction.atomic():
+            # Claim the token by blacklisting it *before* minting a new pair. The
+            # unique constraint makes the claim atomic: when two requests race
+            # with the same token, exactly one creates the row and wins.
+            # (SimpleJWT checks the blacklist first and writes it afterwards.)
+            outstanding, _created = OutstandingToken.objects.get_or_create(
+                jti=refresh[api_settings.JTI_CLAIM],
+                defaults={
+                    "user": user,
+                    "token": str(refresh),
+                    "created_at": refresh.current_time,
+                    "expires_at": datetime_from_epoch(refresh["exp"]),
+                },
+            )
+            _entry, claimed = BlacklistedToken.objects.get_or_create(token=outstanding)
+            if not claimed:
+                raise TokenError(_("Token is blacklisted"))
+            data = {"access": str(refresh.access_token)}
+            refresh.set_jti()
+            refresh.set_exp()
+            refresh.set_iat()
+            refresh.outstand()
+            data["refresh"] = str(refresh)
+        return data
 
 
 class TokenPairResponseSerializer(serializers.Serializer[Any]):

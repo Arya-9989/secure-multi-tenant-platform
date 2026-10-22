@@ -40,14 +40,14 @@ TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
         "Health probes, OpenAPI schema, request IDs, JSON logs, secure settings",
     ),
     SuiteFile(
+        "test_auth.py",
+        21,
+        "Rotation races, spoof-proof throttling, logout everywhere, deactivation",
+    ),
+    SuiteFile(
         "test_users_and_organizations.py",
         21,
         "Role changes, soft deactivation, database check constraints",
-    ),
-    SuiteFile(
-        "test_auth.py",
-        20,
-        "Rotation races, spoof-proof throttling, logout everywhere, deactivation",
     ),
     SuiteFile(
         "test_web.py",
