@@ -1,9 +1,12 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/hero-dark.svg">
+  <img alt="Secure Multi-Tenant Platform. Every tenant, sealed: Alice from Acme asks for a Globex user and gets 404, the same as a random ID. Fail-closed tenant isolation for Django REST Framework, proven by 247 tests." src="docs/hero-light.svg" width="100%">
+</picture>
+
 # Secure Multi-Tenant Platform
 
 [![CI](https://github.com/Arya-9989/secure-multi-tenant-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/Arya-9989/secure-multi-tenant-platform/actions/workflows/ci.yml)
-![Python 3.12](https://img.shields.io/badge/python-3.12-blue)
-![Django 6.0](https://img.shields.io/badge/django-6.0-0C4B33)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+&nbsp;Python 3.12 · Django 6.0 · Django REST Framework · PostgreSQL 17 · [MIT](LICENSE)
 
 A multi-tenant SaaS backend in Django REST Framework where **tenant isolation is enforced
 centrally and then proven by tests**. Every tenant-scoped endpoint is attacked by a
@@ -15,7 +18,10 @@ It includes three roles, token-based expiring invitations, soft deactivation, ha
 sessions (rotation, blacklist, instant revocation) and an append-only audit log that
 PostgreSQL itself refuses to modify.
 
-![Swagger UI: an Acme admin asks for a Globex user and gets 404](docs/screenshots/swagger-cross-tenant-404.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/swagger-cross-tenant-404-dark.png">
+  <img alt="Swagger UI: an Acme admin asks for a Globex user and gets 404" src="docs/screenshots/swagger-cross-tenant-404-light.png">
+</picture>
 
 <sub>An Acme admin, authorized in Swagger UI, asks for a Globex user's ID and gets `404`,
 exactly what a nonexistent ID returns.</sub>
@@ -25,6 +31,7 @@ exactly what a nonexistent ID returns.</sub>
 ## Contents
 
 - [Highlights](#highlights)
+- [Landing page and API docs](#landing-page-and-api-docs)
 - [Quickstart](#quickstart)
 - [Architecture](#architecture)
 - [Tenancy and security model](#tenancy-and-security-model)
@@ -55,6 +62,41 @@ exactly what a nonexistent ID returns.</sub>
 - **Production packaging.** Multi-stage, non-root Docker image running gunicorn with a
   healthcheck. Compose stack with Postgres and Redis. Structured JSON logs carry a request ID.
   Settings come from env vars with secure defaults.
+- **A strict Content Security Policy on every response.** Django's built-in CSP middleware
+  sends `default-src 'self'`, `script-src 'self'`, `object-src 'none'`, `base-uri 'none'` and
+  `frame-ancestors 'none'`, with no `'unsafe-inline'` or `'unsafe-eval'` anywhere. The landing
+  page, Swagger UI and Redoc are served with no inline scripts and no third-party assets.
+
+## Landing page and API docs
+
+The service explains itself at `/`. The landing page is rendered by the app, and wherever it
+can, it reads its facts from the running code instead of repeating them: the role matrix comes
+from `ROLE_PERMISSIONS`, token lifetimes and the login throttle from settings, the audit event
+names from `AuditAction`, and the status line from the same checks as `/health/ready/`. The
+per-file test counts are pinned by `test_landing_test_inventory_matches_the_suite`, which fails
+when the suite and the page disagree. The core content needs no JavaScript.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/landing-dark.png">
+  <img alt="Landing page: Every tenant. Sealed. Acme Corp is Alice's tenant; Globex Inc is sealed from her." src="docs/screenshots/landing-light.png">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/landing-isolation-dark.png">
+  <img alt="Landing page diagram: every request passes context, authentication, role authorization, row scoping, then the service layer and audit log; failures return 401, 403 or 404." src="docs/screenshots/landing-isolation-light.png">
+</picture>
+
+Swagger UI (`/api/docs/`) and Redoc (`/api/redoc/`) share the page's type, colours and light
+and dark themes, which follow the operating system. Every asset is self-hosted: Swagger UI and
+Redoc from `drf-spectacular-sidecar`, and the Inter and JetBrains Mono variable fonts (SIL Open
+Font License) from `apps/web/static/web/fonts/`. Swagger UI's init script is served as a
+separate file. Redoc injects its styles at runtime, so only its page adds a per-response style
+nonce, two pinned style hashes and `worker-src blob:` for the search index.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/redoc-dark.png">
+  <img alt="Redoc, themed to match" src="docs/screenshots/redoc-light.png">
+</picture>
 
 ## Quickstart
 
@@ -63,7 +105,7 @@ exactly what a nonexistent ID returns.</sub>
 ```bash
 docker compose up --build -d --wait
 docker compose exec api python manage.py seed_demo --force
-open http://localhost:8000/api/docs/        # Swagger UI  (Redoc: /api/redoc/)
+open http://localhost:8000/                 # landing page (Swagger UI: /api/docs/, Redoc: /api/redoc/)
 ```
 
 `seed_demo` creates two tenants so you can try the isolation right away. All accounts use
@@ -216,6 +258,7 @@ none, and the database enforces both rules.
 | Invitation tokens leaked from the DB | Only a SHA-256 digest is stored. Tokens are single-use and expire after 72h | `test_invitation_lifecycle`, `test_unusable_tokens_fail_generically` |
 | Audit tampering | Model, QuerySet and admin are read-only. A PostgreSQL `BEFORE UPDATE OR DELETE` trigger blocks raw SQL. Actors with history cannot be hard-deleted (`PROTECT`) | `test_audit_log.py` (incl. `test_database_trigger_rejects_raw_sql_mutation`) |
 | Spoofed client IP or log injection | `X-Forwarded-For` is trusted only with `NUM_PROXIES` > 0. Caller request IDs must match `[A-Za-z0-9._-]{8,64}` | `test_client_ip_trusts_only_configured_proxies`, `test_request_id_is_propagated_or_generated` |
+| Injected script or framing on the landing page and API docs | A strict CSP on every response: scripts, styles and fonts from the app's own origin only, no `'unsafe-inline'`, `frame-ancestors 'none'`; the pages contain no inline code and no third-party assets | `test_web.py::test_strict_content_security_policy_on_every_response`, `test_pages_need_no_inline_code_or_third_party_assets` |
 | A new endpoint ships without isolation | Structural tests: every API route must be in the isolation suite, every router viewset must subclass `TenantScopedViewSet`, every action must declare a permission | `test_every_api_route_is_covered`, `test_every_routed_viewset_is_tenant_scoped_and_declares_permissions` |
 
 **Explicitly out of scope / residual risk**
@@ -253,9 +296,9 @@ always keeps at least one active `ORG_ADMIN`. The matrix is executed by
 
 ## API overview
 
-All endpoints live under `/api/v1/`. The interactive docs are at `/api/docs/` (Swagger UI)
-and `/api/redoc/`, and the schema is at `/api/schema/`. Every response carries an
-`X-Request-ID` header.
+All endpoints live under `/api/v1/`. The landing page is at `/`, the interactive docs are at
+`/api/docs/` (Swagger UI) and `/api/redoc/`, and the schema is at `/api/schema/`. Every
+response carries an `X-Request-ID` header and a `Content-Security-Policy` header.
 
 | Area | Endpoints |
 |---|---|
@@ -326,7 +369,7 @@ of them explicitly.
 | `DJANGO_SECURE_SSL_REDIRECT` / `DJANGO_SECURE_COOKIES` | `True` (when not debug) | HTTPS redirect, secure cookies |
 | `DJANGO_SECURE_HSTS_SECONDS` / `DJANGO_SECURE_HSTS_PRELOAD` | `31536000` / `False` | HSTS |
 | `DJANGO_ADMIN_URL` | `admin/` | Django admin path (read-mostly; super admins only) |
-| `API_DOCS_ENABLED` | `True` | Serve `/api/docs/`, `/api/redoc/`, `/api/schema/` |
+| `API_DOCS_ENABLED` | `True` | Serve `/api/docs/`, `/api/redoc/`, `/api/schema/` (the landing page at `/` is always served and links to them only when enabled) |
 | `LOG_FORMAT` / `LOG_LEVEL` | `json` / `INFO` | `json` or `console` |
 | `GUNICORN_WORKERS` / `GUNICORN_THREADS` / `PORT` | `min(2·CPU+1, 8)` / `2` / `8000` | Server sizing |
 
@@ -338,8 +381,8 @@ DATABASE_URL=postgres://app:app@localhost:5432/app uv run pytest --cov   # what 
 uv run ruff check . && uv run ruff format --check . && uv run mypy .
 ```
 
-The suite has 228 tests and 96% branch coverage (the gate is 90%). It runs against PostgreSQL
-in CI.
+The suite has 247 tests and 96% branch coverage (the gate is 90%). It runs against
+PostgreSQL in CI.
 
 | File | Focus |
 |---|---|
@@ -351,6 +394,7 @@ in CI.
 | `test_audit_log.py` | Immutability (ORM and PostgreSQL trigger), context capture, filters, cursor pagination |
 | `test_users_and_organizations.py` | Role changes, soft deactivation, slugs, uniqueness, DB check constraints |
 | `test_platform.py` | Health probes, OpenAPI schema (zero warnings, validated), request IDs, JSON logs, secure settings, `seed_demo` |
+| `test_web.py` | Landing page facts rendered from code, degraded status, no inline code or third-party assets, the CSP on every response, the Swagger init script, and the landing page's test inventory |
 
 CI (`.github/workflows/ci.yml`) has four jobs. **lint** runs ruff, mypy (strict, with
 django-stubs and DRF stubs), the migration drift check and `check --deploy`. **test** runs
@@ -365,6 +409,7 @@ runs a cross-tenant smoke test against gunicorn.
 ├── apps/
 │   ├── common/          # tenancy.py, permissions.py, views.py (TenantScopedViewSet, health),
 │   │                    # middleware.py, logging.py, serializers.py (strict), guards.py, schema.py
+│   ├── web/             # landing page at /, themed Swagger UI + Redoc, CSS/JS, self-hosted fonts
 │   ├── organizations/   # Organization model, service, viewset
 │   ├── accounts/        # User + Invitation models, roles.py (RBAC matrix), authentication.py,
 │   │   ├── serializers/ # services.py (business rules), views/, management/commands/seed_demo.py
@@ -373,7 +418,7 @@ runs a cross-tenant smoke test against gunicorn.
 │       └── migrations/  # 0002_append_only_trigger.py
 ├── config/              # settings.py (env-driven), test_settings.py, urls.py, wsgi/asgi
 ├── tests/               # pytest-django suite (see table above)
-├── docs/screenshots/
+├── docs/                # README hero (light/dark SVG) and screenshots/
 ├── Dockerfile           # multi-stage, non-root, gunicorn, HEALTHCHECK
 ├── docker-compose.yml   # api + migrate + postgres + redis
 ├── gunicorn.conf.py
