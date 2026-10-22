@@ -49,7 +49,7 @@ body {
 }
 .docs-brand {
   display: inline-flex; align-items: center; gap: 10px;
-  min-height: 44px;
+  min-height: 44px; min-width: 44px;
   color: var(--ink); text-decoration: none;
   font-size: 17px; font-weight: 600; letter-spacing: -0.012em; white-space: nowrap;
 }
@@ -556,3 +556,15 @@ body {
 #redoc-container .token.number,
 #redoc-container .token.boolean { color: #5eead4 !important; }
 
+/* ----------------------------------------------------------------- hit areas
+   Every control is at least 24x24 CSS px (WCAG 2.5.8). */
+:root body .swagger-ui .authorization__btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 32px; min-height: 32px;
+}
+:root body .swagger-ui .info .link { display: inline-flex; align-items: center; min-height: 24px; }
+/* Redoc's "share this section" anchors, field expanders and JSON collapsers. */
+#redoc-container h1 > a[aria-label],
+#redoc-container h2 > a[aria-label] { width: 24px; margin-left: -24px; }
+#redoc-container button { min-height: 24px; }
+#redoc-container button.collapser { min-width: 24px; }
