@@ -48,6 +48,7 @@ PERMISSION_LABELS: dict[Perm, str] = {
     Perm.USER_MANAGE: "Change roles, deactivate and reactivate users",
     Perm.INVITATION_MANAGE: "Invite people and revoke invitations",
     Perm.AUDIT_VIEW: "Query the audit log",
+    Perm.SSO_MANAGE: "Configure single sign-on",
 }
 
 ROLE_SHORT_LABELS: dict[Role, str] = {

@@ -98,6 +98,26 @@ MATRIX = (
         lambda w: reverse("auditlog-detail", args=[w.audit_a.pk]),
         (200, 200, 403),
     ),
+    Row(
+        "user-reset-mfa",
+        "post",
+        lambda w: reverse("user-reset-mfa", args=[w.member_a.pk]),
+        (204, 204, 403),
+    ),
+    Row("ssoprovider-list", "get", lambda w: reverse("ssoprovider-list"), (200, 200, 403)),
+    Row(
+        "ssoprovider-retrieve",
+        "get",
+        lambda w: reverse("ssoprovider-detail", args=[w.sso_a.pk]),
+        (200, 200, 403),
+    ),
+    Row(
+        "ssoprovider-update",
+        "patch",
+        lambda w: reverse("ssoprovider-detail", args=[w.sso_a.pk]),
+        (200, 200, 403),
+        lambda w: {"enabled": False},
+    ),
     Row("me", "get", lambda w: reverse("auth-me"), (200, 200, 200)),
 )
 

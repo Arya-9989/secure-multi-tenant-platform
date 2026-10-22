@@ -10,7 +10,7 @@ name: secure-multi-tenant-platform
 
 x-app-env: &app-env
   DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-compose-local-only-secret-change-me-0123456789abcdef}
-  DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+  DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,api
   # Plain HTTP on localhost. In a real deployment TLS terminates at your proxy:
   # set DJANGO_BEHIND_TLS_PROXY=True and keep the secure defaults below enabled.
   DJANGO_SECURE_SSL_REDIRECT: "False"
@@ -21,6 +21,10 @@ x-app-env: &app-env
   DATABASE_REQUIRE_RLS: "True"
   REDIS_URL: redis://redis:6379/0
   LOG_FORMAT: json
+  # SSO (ADR 0004). The only IdP on this local stack is the Keycloak below, over
+  # plain HTTP; a real deployment leaves SSO_ALLOW_HTTP off (HTTPS required).
+  SSO_ALLOW_HTTP: "True"
+  SSO_CALLBACK_URL: ${SSO_CALLBACK_URL:-http://api:8000/api/v1/auth/sso/callback/}
 
 # Migrations and operator commands connect as the schema owner.
 x-owner-env: &owner-env
@@ -81,6 +85,44 @@ services:
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
+
+  # ------------------------------------------------ SSO, local and e2e only
+  #   docker compose --profile sso up -d --build --wait
+  #   docker compose exec api python manage.py seed_demo --force
+  #   docker compose --profile sso run --rm sso-e2e
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.5.3
+    profiles: ["sso"]
+    command: ["start-dev", "--import-realm", "--http-port=8080", "--health-enabled=true"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+    volumes:
+      - ./docker/keycloak:/opt/keycloak/data/import:ro
+    ports:
+      - "127.0.0.1:${KEYCLOAK_PORT:-8080}:8080"
+    healthcheck:
+      # The image has no curl: ask the management port with bash's /dev/tcp.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.0\r\n\r\n' >&3 && grep -q UP <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+  sso-e2e:
+    image: python:3.12-slim-trixie
+    profiles: ["sso"]
+    command: ["python", "/e2e/sso_keycloak.py"]
+    volumes:
+      - ./e2e:/e2e:ro
+    environment:
+      API_URL: http://api:8000
+      KEYCLOAK_URL: http://keycloak:8080
+    depends_on:
+      api:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    restart: "no"
 
 volumes:
   pgdata:

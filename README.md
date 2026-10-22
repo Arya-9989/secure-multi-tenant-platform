@@ -82,6 +82,16 @@ exactly what a nonexistent ID returns.</sub>
 - **Rate limits a client can't dodge.** Every throttle keys on the same client IP the audit
   log records, and `X-Forwarded-For` counts only behind `NUM_PROXIES` trusted proxies. The
   Django admin sign-in shares the API's credential limit and is audited the same way.
+- **A second factor, and SSO through each customer's own IdP.** Any user can add an
+  authenticator app (TOTP, RFC 6238, verified against the RFC's test vectors) or a security
+  key (WebAuthn through `py_webauthn`), and gets ten single-use recovery codes stored as
+  keyed digests. A TOTP code is accepted once, even by two racing requests, and never after
+  a newer one. Organization admins configure their OpenID Connect provider at
+  `/api/v1/sso-providers/`; sign-in uses the authorization code flow with PKCE, single-use
+  state and nonce, and checks the ID token's signature, algorithm, issuer, audience and
+  expiry. One tenant's IdP can never sign in another tenant's user, and tokens never appear
+  in a URL. An end-to-end test signs in through a real Keycloak in CI
+  ([ADR 0004](docs/adr/0004-mfa-and-oidc-sso.md)).
 - **Per-account sign-in delays that can't lock you out.** On top of the per-IP limit, each
   account gets 5 free attempts and then a delay that doubles from 2 seconds to a 15-minute
   cap; attempts during a delay are refused before the password is checked. A browser that
@@ -367,6 +377,10 @@ is in [ADR 0001](docs/adr/0001-postgres-row-level-security.md).
 | Trusting role or tenant claims in a token | Authorization reads role and tenant from the DB on every request | `test_role_claims_in_token_are_ignored` |
 | Refresh-token replay, stolen sessions | Refresh-token families: a rotated token that comes back revokes the whole session, both copies, and is audited. Rotation is a compare-and-swap, so racing requests can't fork a session. Access tokens die with their session. Logout, logout-all, `token_version` bump on password change or deactivation | `test_sessions.py` (`test_replaying_a_rotated_token_revokes_the_whole_session`, `test_concurrent_refreshes_with_one_token_have_exactly_one_winner` with 8 threads), `test_auth.py` |
 | Deactivated user or org keeps working until token expiry | User and org `is_active` checked on every request and refresh. Deactivating an org revokes its members' tokens, so reactivating it doesn't revive old sessions | `test_deactivation_takes_effect_on_the_next_request`, `test_deactivating_an_organization_cuts_off_live_sessions`, `test_reactivating_an_organization_does_not_revive_old_sessions` |
+| A phished or reused password | MFA: TOTP or WebAuthn after the password, recovery codes for a lost device, an audited admin reset that also ends sessions; the Django admin asks for the code too | `test_a_password_alone_no_longer_signs_in`, `test_the_admin_asks_for_the_second_factor` |
+| Replaying a one-time code or a security-key answer | Each TOTP time step is accepted once by a compare-and-swap (also between racing requests); recovery codes are consumed by a conditional update; WebAuthn challenges are single-use and signature counters must advance | `test_a_totp_code_works_once`, `test_one_code_raced_from_two_challenges_signs_in_once`, `test_a_replayed_assertion_is_refused` |
+| Forged or substituted ID tokens, IdP mix-up, authorization-code theft | PKCE (S256), single-use state and nonce, JWKS signature with an asymmetric-only allow-list, exact `iss` (and discovery issuer), `aud`/`azp`, expiry; HTTPS-only IdP endpoints | `test_sso.py::test_invalid_id_tokens_are_refused` (14 variants), `test_a_discovery_document_for_another_issuer_is_refused`, `test_state_is_single_use` |
+| One tenant's IdP signing into another tenant | An IdP vouches only for existing, active members of its own organization, by linked subject or verified email; no just-in-time accounts, no super admins | `test_one_organizations_idp_cannot_sign_in_another_organizations_user`, e2e `Grace (Globex) cannot sign in through Acme's IdP` |
 | Credential brute force | 10/min per-client throttle on API login, admin sign-in, refresh, password change and invitation accept, plus audited failures | `test_login_is_throttled`, `test_admin_login_is_throttled_like_the_api` |
 | Distributed guessing against one account (a fresh IP per request) | Per-account buckets: 5 free attempts, then delays doubling to 15 minutes, refused attempts never evaluated; race-safe under bursts | `test_login_throttling.py` (`test_a_distributed_attack_meets_doubling_delays`, `test_a_burst_gets_exactly_the_attempts_the_policy_allows`, Redis variant in CI) |
 | Locking a victim out by failing on their behalf | No hard lockout; devices that signed in before carry a signed device token and are counted separately; a stolen device token buys only that device's budget; operators can clear a bucket | `test_the_victim_still_gets_into_their_own_device`, `test_a_stolen_device_token_buys_only_that_devices_budget`, `test_operators_can_clear_an_accounts_delay` |
@@ -413,7 +427,9 @@ admins.
 | Deactivate / reactivate users | `POST /users/{id}/deactivate/`, `.../reactivate/` | yes | own org | no |
 | Manage invitations | `GET/POST /invitations/`, `POST /invitations/{id}/revoke/` | any org | own org | no |
 | Query audit log | `GET /audit-logs/`, `GET /audit-logs/{id}/` | all + platform events | own org | no |
-| Own profile and sessions | `/auth/me/`, `/auth/password/change/`, `/auth/logout*/` | yes | yes | yes |
+| Reset a member's second factors | `POST /users/{id}/reset-mfa/` | yes | own org | no |
+| Configure single sign-on | `GET/POST /sso-providers/`, `GET/PATCH/DELETE /sso-providers/{id}/` | any org | own org | no |
+| Own profile, sessions and second factors | `/auth/me/`, `/auth/password/change/`, `/auth/logout*/`, `/auth/mfa/*` | yes | yes | yes |
 
 Guard rails that apply to every role: nobody can change their own role or status, super
 admin accounts can't be managed over HTTP (use `createsuperuser`), and an organization
@@ -434,6 +450,8 @@ under `/api/`, including unknown routes, are JSON.
 | Users | `GET users/` (`?role=`, `?is_active=`, `?search=`) · `GET/PATCH users/{id}/` · `POST users/{id}/deactivate/` · `POST users/{id}/reactivate/` |
 | Invitations | `GET/POST invitations/` (`?status=pending\|accepted\|revoked\|expired`) · `GET invitations/{id}/` · `POST invitations/{id}/revoke/` · `POST invitations/accept/` (public) |
 | Audit log | `GET audit-logs/` (`?action=`, `?actor=`, `?target_id=`, `?request_id=`, `?created_after=`, `?created_before=`, cursor-paginated) · `GET audit-logs/{id}/` |
+| Second factors | `GET auth/mfa/` · `POST auth/mfa/totp/` · `POST auth/mfa/totp/confirm/` · `POST auth/mfa/totp/disable/` · `POST auth/mfa/recovery-codes/` · `POST auth/mfa/webauthn/register/` · `POST auth/mfa/webauthn/register/complete/` · `POST auth/mfa/webauthn/{id}/remove/` · sign-in: `POST auth/mfa/verify/` · `POST auth/mfa/webauthn/begin/` · `POST auth/mfa/webauthn/complete/` |
+| Single sign-on | `GET/POST sso-providers/` · `GET/PATCH/DELETE sso-providers/{id}/` · `GET auth/sso/{organization-slug}/login/` · `GET auth/sso/callback/` · `POST auth/sso/exchange/` |
 | Health | `GET /health/live/` · `GET /health/ready/` (database + cache, `503` when degraded) |
 
 ```bash
@@ -465,10 +483,22 @@ curl -s -X POST $API/auth/logout-all/ -H "$AUTH" -o /dev/null -w '%{http_code}\n
 ```
 
 Audit events: `auth.login_succeeded`, `auth.login_failed`, `auth.refresh_reuse_detected`,
-`auth.logout`, `auth.logout_all`,
-`auth.password_changed`, `organization.created`, `organization.updated`,
-`user.profile_updated`, `user.role_changed`, `user.deactivated`, `user.reactivated`,
-`invitation.created`, `invitation.revoked`, `invitation.accepted`.
+`auth.mfa_failed`, `auth.sso_failed`, `auth.logout`, `auth.logout_all`,
+`auth.password_changed`, `organization.created`, `organization.updated`, `mfa.totp_enabled`,
+`mfa.totp_disabled`, `mfa.webauthn_added`, `mfa.webauthn_removed`,
+`mfa.recovery_codes_generated`, `mfa.reset`, `sso.provider_created`, `sso.provider_updated`,
+`sso.provider_deleted`, `user.profile_updated`, `user.role_changed`, `user.deactivated`,
+`user.reactivated`, `invitation.created`, `invitation.revoked`, `invitation.accepted`.
+
+With MFA enabled, `POST auth/login/` answers a correct password with
+`{"mfa_required": true, "mfa_token": "...", "methods": ["totp", "recovery_code"]}` instead of
+tokens; send the token and a code to `POST auth/mfa/verify/` (or run the WebAuthn ceremony
+with `auth/mfa/webauthn/begin/` and `complete/`) within five minutes:
+
+```bash
+curl -s -X POST $API/auth/mfa/totp/ -H "$AUTH" -H 'Content-Type: application/json'   -d '{"password":"Demo-Passw0rd!2026"}' | jq .otpauth_uri        # scan it, then:
+curl -s -X POST $API/auth/mfa/totp/confirm/ -H "$AUTH" -H 'Content-Type: application/json'   -d '{"code":"123456"}' | jq .recovery_codes                      # shown once
+```
 
 ## Configuration
 
@@ -495,6 +525,11 @@ of them explicitly.
 | `INVITATION_TTL_HOURS` | `72` | Invitation expiry |
 | `FRONTEND_INVITE_URL` | `http://localhost:3000/accept-invite?token={token}` | Link placed in invitation emails |
 | `EMAIL_BACKEND` / `DEFAULT_FROM_EMAIL` | console / `no-reply@localhost` | Email delivery |
+| `FIELD_ENCRYPTION_KEYS` | *(derived from `DJANGO_SECRET_KEY`)* | Comma-separated Fernet keys for TOTP seeds and OIDC client secrets; the first encrypts, all decrypt (prepend a new key to rotate). Set it explicitly in production |
+| `MFA_ISSUER` / `MFA_CHALLENGE_TTL_SECONDS` | `Secure Multi-Tenant Platform` / `300` | Name shown in authenticator apps; lifetime of the second sign-in step |
+| `WEBAUTHN_RP_ID` / `WEBAUTHN_RP_NAME` / `WEBAUTHN_ORIGINS` | `localhost` / platform name / `http://localhost:8000` | WebAuthn relying party: your registrable domain and the exact origins your pages run on |
+| `SSO_CALLBACK_URL` / `FRONTEND_SSO_URL` | `http://localhost:8000/api/v1/auth/sso/callback/` / `http://localhost:3000/sso/complete` | The redirect URI to register with IdPs; the page that receives the one-time code |
+| `SSO_HTTP_TIMEOUT_SECONDS` / `SSO_ALLOW_HTTP` | `5` / `False` | Timeout for calls to IdPs; plain-HTTP IdPs (only for a local Keycloak) |
 | `THROTTLE_AUTH` / `THROTTLE_ANON` / `THROTTLE_USER` | `10/min` / `60/min` / `600/min` | Rate limits |
 | `LOGIN_ACCOUNT_FREE_ATTEMPTS` / `LOGIN_ACCOUNT_BASE_DELAY_SECONDS` / `LOGIN_ACCOUNT_MAX_DELAY_SECONDS` | `5` / `2` / `900` | Per-account sign-in delays: free attempts, the first delay (it doubles), the cap |
 | `LOGIN_ACCOUNT_WINDOW_SECONDS` / `LOGIN_DEVICE_TRUST_DAYS` | `86400` / `90` | How long failed attempts are remembered; how long a device token is honoured. `manage.py clear_login_throttle <email>` clears an account's delay |
@@ -540,6 +575,8 @@ PostgreSQL in CI.
 | `test_privilege_escalation.py` | Mass assignment, self-promotion, super-admin protection, last-admin invariant, forged tokens |
 | `test_auth.py` | Login auditing, rotation, logout(-all), deactivation and reactivation, throttling that a forged `X-Forwarded-For` can't dodge, password change |
 | `test_login_throttling.py` | Per-account delays against a distributed attacker, device tokens (the victim gets in, a stolen one buys little, forged and expired ones count as strangers), identical behaviour for unknown emails, bursts of 20 threads, the admin, the operator command, Redis |
+| `test_mfa.py` | TOTP against the RFC 4226 and 6238 test vectors, enrolment, replay within the time step (also by racing requests), stale codes, recovery codes used once, five attempts per challenge, the account throttle, WebAuthn registration and sign-in through `py_webauthn` with a software authenticator (wrong origin, RP ID, presence, counter, replayed assertion, someone else's key), foreign key IDs answering 404, admin reset, the Django admin's code field, key rotation |
+| `test_sso.py` | OIDC against an in-process IdP that checks PKCE and client credentials: 14 forged or broken ID tokens, discovery mix-up, insecure endpoints, state and code replay, key rotation, no IdP crossing tenants or minting super admins, no just-in-time accounts, subject takeover, provider management with an encrypted, never-returned secret, the HTTP client's timeouts and errors |
 | `test_sessions.py` | Refresh-token families: a replayed token revokes the session and is audited once, identical errors, forged session claims, absolute expiry, reasons on every revocation, `prune_sessions`, 8 concurrent refreshes with one winner |
 | `test_invitations.py` | Lifecycle, expiry, revocation, single use, weak passwords, sign-up races, enumeration resistance |
 | `test_audit_log.py` | Immutability (ORM, bulk upserts and PostgreSQL trigger), context capture, filters, cursor pagination |
@@ -548,13 +585,24 @@ PostgreSQL in CI.
 | `test_platform.py` | Health probes, OpenAPI schema (zero warnings, validated), request IDs, JSON logs, secure settings, `seed_demo` |
 | `test_web.py` | Landing page facts rendered from code, degraded status, no inline code or third-party assets, the CSP on every response, Swagger deep links and plugin order, the patched Redoc bundle, error pages (HTML and JSON), the isolation story (complete without JavaScript, true to the API's real 404 and SQL, animated only without reduced motion) and the landing page's test inventory |
 
-CI (`.github/workflows/ci.yml`) has four jobs. **lint** runs ruff, mypy (strict, with
+CI (`.github/workflows/ci.yml`) has five jobs. **lint** runs ruff, mypy (strict, with
 django-stubs and DRF stubs), the migration drift check and `check --deploy`. **test** runs
 pytest against a PostgreSQL 17 service, as the runtime role, with a coverage report. **audit**
 runs pip-audit over the hash-pinned lockfile export. **docker** builds the image, boots the
 compose stack and runs a cross-tenant smoke test against gunicorn, then checks with `psql`
 that neither the runtime role nor the owner sees a row without a scope, and that the API
-refuses to start as the owner.
+refuses to start as the owner. **sso-e2e** starts Keycloak (`--profile sso`) with an
+imported realm and runs `e2e/sso_keycloak.py` inside the compose network: Alice signs in
+through Keycloak's real login form, the callback can't be replayed, an unverified email is
+refused and a Globex user can't use Acme's IdP.
+
+To run that locally:
+
+```bash
+docker compose --profile sso up -d --build --wait keycloak api
+docker compose exec api python manage.py seed_demo --force
+docker compose --profile sso run --rm sso-e2e
+```
 
 ## Project structure
 
@@ -572,12 +620,16 @@ refuses to start as the owner.
 │   │   │                # backends.py + scopes.py (sign-in under row-level security),
 │   │   ├── serializers/ # services.py (business rules), views/, management/commands/seed_demo.py
 │   │   └── views/
-│   └── auditlogs/       # AuditLog model, record() service, read-only API,
-│       └── migrations/  # 0002_append_only_trigger.py
+│   ├── auditlogs/       # AuditLog model, record() service, read-only API,
+│   │   └── migrations/  # 0002_append_only_trigger.py
+│   ├── mfa/             # totp.py (RFC 6238), services.py (TOTP, WebAuthn, recovery codes), views
+│   └── sso/             # oidc.py (PKCE, ID-token validation), provider model, services, views
+├── e2e/                 # sso_keycloak.py: SSO through a real Keycloak (compose profile sso)
 ├── config/              # settings.py (env-driven), test_settings.py, urls.py, wsgi/asgi
 ├── tests/               # pytest-django suite (see table above)
 ├── docs/                # adr/ (design decisions), README hero (light/dark SVG), screenshots/
 ├── docker/postgres/     # initdb/10-roles.sh: the owner and runtime roles
+├── docker/keycloak/     # acme-realm.json: the local IdP's realm, client and test users
 ├── Dockerfile           # multi-stage, non-root, gunicorn, HEALTHCHECK
 ├── docker-compose.yml   # api + migrate + postgres + redis
 ├── gunicorn.conf.py
@@ -653,7 +705,8 @@ the prototype are not upgradable in place.
 
 None of these are implemented yet.
 
-- MFA (TOTP/WebAuthn) and SSO via OIDC/SAML for organization admins.
+- SAML 2.0 single sign-on, deferred: the vetted Python libraries need the `xmlsec1` native
+  stack, and OIDC covers the same need with every major IdP (see ADR 0004).
 - Audit log streaming to a SIEM, time-based partitioning and retention, and hash-chaining
   for tamper evidence beyond the database.
 - Asynchronous email delivery (task queue plus provider) with delivery status on invitations.

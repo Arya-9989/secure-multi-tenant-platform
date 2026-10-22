@@ -19,11 +19,22 @@ class AuditAction(models.TextChoices):
         "auth.refresh_reuse_detected",
         "Refresh token replayed; session revoked",
     )
+    MFA_FAILED = "auth.mfa_failed", "Second factor rejected"
+    SSO_FAILED = "auth.sso_failed", "Single sign-on rejected"
     LOGOUT = "auth.logout", "Logout"
     LOGOUT_ALL = "auth.logout_all", "Logout from all sessions"
     PASSWORD_CHANGED = "auth.password_changed", "Password changed"
     ORGANIZATION_CREATED = "organization.created", "Organization created"
     ORGANIZATION_UPDATED = "organization.updated", "Organization updated"
+    MFA_TOTP_ENABLED = "mfa.totp_enabled", "Authenticator app enabled"
+    MFA_TOTP_DISABLED = "mfa.totp_disabled", "Authenticator app disabled"
+    MFA_WEBAUTHN_ADDED = "mfa.webauthn_added", "Security key added"
+    MFA_WEBAUTHN_REMOVED = "mfa.webauthn_removed", "Security key removed"
+    MFA_RECOVERY_CODES_GENERATED = "mfa.recovery_codes_generated", "Recovery codes generated"
+    MFA_RESET = "mfa.reset", "Second factors reset by an admin"
+    SSO_PROVIDER_CREATED = "sso.provider_created", "SSO provider configured"
+    SSO_PROVIDER_UPDATED = "sso.provider_updated", "SSO provider updated"
+    SSO_PROVIDER_DELETED = "sso.provider_deleted", "SSO provider removed"
     USER_PROFILE_UPDATED = "user.profile_updated", "User profile updated"
     USER_ROLE_CHANGED = "user.role_changed", "User role changed"
     USER_DEACTIVATED = "user.deactivated", "User deactivated"

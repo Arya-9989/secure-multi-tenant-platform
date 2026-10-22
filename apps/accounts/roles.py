@@ -35,6 +35,7 @@ class Perm(StrEnum):
     USER_MANAGE = "user:manage"
     INVITATION_MANAGE = "invitation:manage"
     AUDIT_VIEW = "audit:view"
+    SSO_MANAGE = "sso:manage"
 
 
 ROLE_PERMISSIONS: Mapping[str, frozenset[Perm]] = {
@@ -46,6 +47,7 @@ ROLE_PERMISSIONS: Mapping[str, frozenset[Perm]] = {
             Perm.USER_MANAGE,
             Perm.INVITATION_MANAGE,
             Perm.AUDIT_VIEW,
+            Perm.SSO_MANAGE,
         }
     ),
     Role.MEMBER: frozenset({Perm.ORGANIZATION_VIEW, Perm.USER_VIEW}),

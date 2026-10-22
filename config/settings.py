@@ -51,6 +51,8 @@ INSTALLED_APPS = [
     "apps.organizations",
     "apps.accounts",
     "apps.auditlogs",
+    "apps.mfa",
+    "apps.sso",
     "apps.web",
     # django.contrib.admin, hardened (apps.common.admin_site). Listed after
     # apps.web so that app's admin/base_site.html (theme, icon) takes precedence.
@@ -131,6 +133,28 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
+
+# Fernet keys for secrets stored encrypted (TOTP seeds, OIDC client secrets). The
+# first encrypts; all decrypt. Unset: derived from SECRET_KEY (ADR 0004).
+FIELD_ENCRYPTION_KEYS: list[str] = env.list("FIELD_ENCRYPTION_KEYS", default=[])
+
+# MFA (ADR 0004). WebAuthn's relying party: the site's registrable domain and the
+# exact origins pages calling navigator.credentials are served from.
+MFA_ISSUER: str = env.str("MFA_ISSUER", default="Secure Multi-Tenant Platform")
+MFA_CHALLENGE_TTL_SECONDS: int = env.int("MFA_CHALLENGE_TTL_SECONDS", default=300)
+WEBAUTHN_RP_ID: str = env.str("WEBAUTHN_RP_ID", default="localhost")
+WEBAUTHN_RP_NAME: str = env.str("WEBAUTHN_RP_NAME", default="Secure Multi-Tenant Platform")
+WEBAUTHN_ORIGINS: list[str] = env.list("WEBAUTHN_ORIGINS", default=["http://localhost:8000"])
+
+# SSO via OpenID Connect (ADR 0004). The callback the IdP redirects to (register it
+# with the IdP) and the frontend page that receives the one-time code.
+SSO_CALLBACK_URL: str = env.str(
+    "SSO_CALLBACK_URL", default="http://localhost:8000/api/v1/auth/sso/callback/"
+)
+FRONTEND_SSO_URL: str = env.str("FRONTEND_SSO_URL", default="http://localhost:3000/sso/complete")
+SSO_HTTP_TIMEOUT_SECONDS: float = env.float("SSO_HTTP_TIMEOUT_SECONDS", default=5.0)
+# IdP URLs must be HTTPS. Allow plain HTTP only for a local IdP (the compose Keycloak).
+SSO_ALLOW_HTTP: bool = env.bool("SSO_ALLOW_HTTP", default=False)
 
 # Per-account sign-in throttling (ADR 0003): free attempts, then a doubling delay.
 LOGIN_ACCOUNT_FREE_ATTEMPTS: int = env.int("LOGIN_ACCOUNT_FREE_ATTEMPTS", default=5)
@@ -242,6 +266,8 @@ SPECTACULAR_SETTINGS = {
         {"name": "users", "description": "Tenant-scoped user directory and administration."},
         {"name": "invitations", "description": "Expiring, single-use, token-based onboarding."},
         {"name": "audit-logs", "description": "Append-only, tenant-scoped security audit trail."},
+        {"name": "mfa", "description": "Your second factors: authenticator app, security keys."},
+        {"name": "sso", "description": "Single sign-on through your organization's OIDC IdP."},
         {"name": "health", "description": "Liveness and readiness probes."},
     ],
 }

@@ -19,6 +19,7 @@ from apps.accounts import login_throttle, services
 from apps.accounts.models import SessionEndReason
 from apps.auditlogs.models import AuditAction
 from apps.auditlogs.services import record
+from apps.common.admin_forms import MfaAdminAuthenticationForm
 from apps.common.tenancy import resolve_user
 from apps.common.throttling import AdminLoginThrottle
 from apps.web.errors import too_many_requests
@@ -28,6 +29,7 @@ ADMIN_CHANNEL = "admin"
 
 class PlatformAdminSite(admin.AdminSite):
     site_header = "Secure Multi-Tenant Platform"
+    login_form = MfaAdminAuthenticationForm  # the second factor applies here too
     site_title = "Platform admin"
     index_title = "Platform administration"
 

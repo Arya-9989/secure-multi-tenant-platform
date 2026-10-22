@@ -18,6 +18,8 @@ dependencies = [
     "whitenoise>=6.9",
     "redis>=5.2",
     "django-stubs-ext>=6.0,<6.1",
+    "webauthn>=2.5",
+    "cryptography>=46",
 ]
 
 [dependency-groups]

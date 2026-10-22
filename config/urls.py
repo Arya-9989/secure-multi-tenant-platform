@@ -16,7 +16,9 @@ from apps.accounts.views.invitations import AcceptInvitationView, InvitationView
 from apps.accounts.views.users import UserViewSet
 from apps.auditlogs.views import AuditLogViewSet
 from apps.common.views import LivenessView, ReadinessView
+from apps.mfa import views as mfa
 from apps.organizations.views import OrganizationViewSet
+from apps.sso.views import OidcProviderViewSet, SsoCallbackView, SsoExchangeView, SsoLoginView
 from apps.web.views import LandingView, ThemedRedocView, ThemedSwaggerView, redoc_bundle
 
 router = SimpleRouter()
@@ -24,6 +26,7 @@ router.register("organizations", OrganizationViewSet, basename="organization")
 router.register("users", UserViewSet, basename="user")
 router.register("invitations", InvitationViewSet, basename="invitation")
 router.register("audit-logs", AuditLogViewSet, basename="auditlog")
+router.register("sso-providers", OidcProviderViewSet, basename="ssoprovider")
 
 api_v1: list[URLPattern | URLResolver] = [
     path("auth/login/", LoginView.as_view(), name="auth-login"),
@@ -33,6 +36,38 @@ api_v1: list[URLPattern | URLResolver] = [
     path("auth/me/", MeView.as_view(), name="auth-me"),
     path("auth/password/change/", PasswordChangeView.as_view(), name="auth-password-change"),
     path("invitations/accept/", AcceptInvitationView.as_view(), name="invitation-accept"),
+    # Second factors (ADR 0004): the signed-in user's own, and the second sign-in step.
+    path("auth/mfa/", mfa.MfaStatusView.as_view(), name="mfa-status"),
+    path("auth/mfa/totp/", mfa.TotpSetupView.as_view(), name="mfa-totp-setup"),
+    path("auth/mfa/totp/confirm/", mfa.TotpConfirmView.as_view(), name="mfa-totp-confirm"),
+    path("auth/mfa/totp/disable/", mfa.TotpDisableView.as_view(), name="mfa-totp-disable"),
+    path("auth/mfa/recovery-codes/", mfa.RecoveryCodesView.as_view(), name="mfa-recovery-codes"),
+    path(
+        "auth/mfa/webauthn/register/",
+        mfa.WebAuthnRegisterBeginView.as_view(),
+        name="mfa-webauthn-register",
+    ),
+    path(
+        "auth/mfa/webauthn/register/complete/",
+        mfa.WebAuthnRegisterCompleteView.as_view(),
+        name="mfa-webauthn-register-complete",
+    ),
+    path(
+        "auth/mfa/webauthn/<uuid:credential_id>/remove/",
+        mfa.WebAuthnRemoveView.as_view(),
+        name="mfa-webauthn-remove",
+    ),
+    path("auth/mfa/verify/", mfa.MfaVerifyView.as_view(), name="mfa-verify"),
+    path("auth/mfa/webauthn/begin/", mfa.WebAuthnBeginView.as_view(), name="mfa-webauthn-begin"),
+    path(
+        "auth/mfa/webauthn/complete/",
+        mfa.WebAuthnCompleteView.as_view(),
+        name="mfa-webauthn-complete",
+    ),
+    # SSO via OpenID Connect (ADR 0004).
+    path("auth/sso/callback/", SsoCallbackView.as_view(), name="sso-callback"),
+    path("auth/sso/exchange/", SsoExchangeView.as_view(), name="sso-exchange"),
+    path("auth/sso/<slug:slug>/login/", SsoLoginView.as_view(), name="sso-login"),
     *router.urls,
 ]
 

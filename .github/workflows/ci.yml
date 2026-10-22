@@ -165,3 +165,21 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose down -v
+
+  sso-e2e:
+    name: SSO end to end (Keycloak)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Start the stack with Keycloak
+        run: docker compose --profile sso up -d --build --wait --wait-timeout 300 keycloak api
+      - name: Seed the demo tenants
+        run: docker compose exec -T api python manage.py seed_demo --force
+      - name: Sign in through Keycloak (browser leg played inside the compose network)
+        run: docker compose --profile sso run --rm sso-e2e
+      - name: Container logs
+        if: failure()
+        run: docker compose --profile sso logs
+      - name: Tear down
+        if: always()
+        run: docker compose --profile sso down -v

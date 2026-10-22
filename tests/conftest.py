@@ -21,9 +21,10 @@ from apps.accounts.models import Invitation, User, hash_invitation_token
 from apps.accounts.roles import Role
 from apps.auditlogs.models import AuditAction, AuditLog
 from apps.auditlogs.services import record
-from apps.common import rls
+from apps.common import crypto, rls
 from apps.common.rls_migrations import runtime_role
 from apps.organizations.models import Organization
+from apps.sso.models import OidcProvider
 
 PASSWORD = "Correct-Horse-Battery-9"
 POSTGRES = connection.vendor == "postgresql"
@@ -143,12 +144,14 @@ class World:
     inactive_a: User
     invitation_a: Invitation
     audit_a: AuditLog
+    sso_a: OidcProvider
     org_b: Organization
     admin_b: User
     member_b: User
     inactive_b: User
     invitation_b: Invitation
     audit_b: AuditLog
+    sso_b: OidcProvider
 
 
 @pytest.fixture
@@ -162,7 +165,13 @@ def world(db: None) -> World:
         inactive = make_user(f"former@{key}.test", Role.MEMBER, org, is_active=False)
         invitation = make_invitation(org, admin, f"invitee@{key}.test")
         audit = record(AuditAction.USER_ROLE_CHANGED, actor=admin, organization=org, target=member)
-        tenants[key] = (org, admin, member, inactive, invitation, audit)
+        sso = OidcProvider.objects.create(
+            organization=org,
+            issuer=f"https://idp.{key}.test/realms/{key}",
+            client_id=f"platform-{key}",
+            client_secret_encrypted=crypto.encrypt(f"secret-{key}"),
+        )
+        tenants[key] = (org, admin, member, inactive, invitation, audit, sso)
     return World(super_admin, *tenants["a"], *tenants["b"])
 
 

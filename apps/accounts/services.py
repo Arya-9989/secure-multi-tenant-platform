@@ -142,7 +142,7 @@ def update_profile(user: User, *, changes: dict[str, Any]) -> User:
 
 
 # ---------------------------------------------------------------- user administration
-def _check_can_administer(actor: User, target: User) -> None:
+def check_can_administer(actor: User, target: User) -> None:
     require_permission(actor, Perm.USER_MANAGE)
     require_same_tenant(actor, target)
     if target.is_super_admin:
@@ -174,7 +174,7 @@ def _ensure_another_active_admin(target: User) -> None:
 
 
 def change_role(*, actor: User, target: User, new_role: str) -> User:
-    _check_can_administer(actor, target)
+    check_can_administer(actor, target)
     if new_role not in ASSIGNABLE_ROLES:
         raise ValidationError({"role": [f'"{new_role}" is not an assignable role.']})
     with transaction.atomic():
@@ -197,7 +197,7 @@ def change_role(*, actor: User, target: User, new_role: str) -> User:
 
 
 def deactivate_user(*, actor: User, target: User) -> User:
-    _check_can_administer(actor, target)
+    check_can_administer(actor, target)
     with transaction.atomic():
         target = _lock(target)
         if not target.is_active:
@@ -218,7 +218,7 @@ def deactivate_user(*, actor: User, target: User) -> User:
 
 
 def reactivate_user(*, actor: User, target: User) -> User:
-    _check_can_administer(actor, target)
+    check_can_administer(actor, target)
     with transaction.atomic():
         target = _lock(target)
         if target.is_active:

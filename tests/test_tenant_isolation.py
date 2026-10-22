@@ -28,6 +28,7 @@ from apps.auditlogs.models import AuditLog
 from apps.common.permissions import TenantObjectPermission
 from apps.common.views import TenantScopedViewSet
 from apps.organizations.models import Organization
+from apps.sso.models import OidcProvider
 from config.urls import api_v1, router
 from tests.conftest import ClientFactory, World
 
@@ -72,6 +73,17 @@ OBJECT_CASES = (
         "invitation-revoke", "post", "invitation-revoke", "invitation_b", Perm.INVITATION_MANAGE
     ),
     ObjectCase("auditlog-retrieve", "get", "auditlog-detail", "audit_b", Perm.AUDIT_VIEW),
+    ObjectCase("user-reset-mfa", "post", "user-reset-mfa", "member_b", Perm.USER_MANAGE),
+    ObjectCase("ssoprovider-retrieve", "get", "ssoprovider-detail", "sso_b", Perm.SSO_MANAGE),
+    ObjectCase(
+        "ssoprovider-update",
+        "patch",
+        "ssoprovider-detail",
+        "sso_b",
+        Perm.SSO_MANAGE,
+        {"enabled": False, "client_secret": "attacker-controlled"},
+    ),
+    ObjectCase("ssoprovider-delete", "delete", "ssoprovider-detail", "sso_b", Perm.SSO_MANAGE),
 )
 
 
@@ -87,6 +99,7 @@ LIST_CASES = (
     ListCase("user-list", Perm.USER_VIEW, User),
     ListCase("invitation-list", Perm.INVITATION_MANAGE, Invitation),
     ListCase("auditlog-list", Perm.AUDIT_VIEW, AuditLog),
+    ListCase("ssoprovider-list", Perm.SSO_MANAGE, OidcProvider),
 )
 
 
@@ -131,7 +144,7 @@ def test_super_admin_is_not_tenant_restricted(
     response = getattr(client_for(world.super_admin), case.method)(
         url, case.body or {}, format="json"
     )
-    assert response.status_code == 200, response.content
+    assert response.status_code in {200, 204}, response.content
 
 
 @pytest.mark.parametrize("actor_name", TENANT_A_ACTORS)
@@ -215,6 +228,23 @@ SELF_SERVICE_OR_PUBLIC_ROUTES = {
     "auth-me",
     "auth-password-change",
     "invitation-accept",
+    # The signed-in user's own second factors; foreign credential IDs are covered by
+    # test_mfa.py::test_a_foreign_security_key_is_not_found.
+    "mfa-status",
+    "mfa-totp-setup",
+    "mfa-totp-confirm",
+    "mfa-totp-disable",
+    "mfa-recovery-codes",
+    "mfa-webauthn-register",
+    "mfa-webauthn-register-complete",
+    "mfa-webauthn-remove",
+    # The public second sign-in step and SSO flow (test_mfa.py, test_sso.py).
+    "mfa-verify",
+    "mfa-webauthn-begin",
+    "mfa-webauthn-complete",
+    "sso-login",
+    "sso-callback",
+    "sso-exchange",
 }
 COVERED_ROUTES = (
     {c.route for c in OBJECT_CASES}

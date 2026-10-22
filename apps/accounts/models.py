@@ -242,6 +242,7 @@ class SessionEndReason(models.TextChoices):
     PASSWORD_CHANGED = "password_changed", "Password changed"
     USER_DEACTIVATED = "user_deactivated", "User deactivated"
     ORGANIZATION_DEACTIVATED = "organization_deactivated", "Organization deactivated"
+    MFA_RESET = "mfa_reset", "Second factors reset by an admin"
 
 
 class RefreshTokenFamilyQuerySet(TenantQuerySet["RefreshTokenFamily"]):

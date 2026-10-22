@@ -21,8 +21,18 @@ class SuiteFile(NamedTuple):
 TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
     SuiteFile(
         "test_permissions_matrix.py",
-        61,
+        77,
         "The role table, executed for every role and for anonymous callers",
+    ),
+    SuiteFile(
+        "test_tenant_isolation.py",
+        62,
+        "Cross-tenant matrix, foreign-key references, existence oracle, route coverage",
+    ),
+    SuiteFile(
+        "test_sso.py",
+        56,
+        "OIDC with PKCE: each ID-token check attacked, no IdP crosses tenants",
     ),
     SuiteFile(
         "test_row_level_security.py",
@@ -30,19 +40,19 @@ TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
         "Raw SQL past the ORM, no scope, a fresh connection: PostgreSQL still isolates",
     ),
     SuiteFile(
-        "test_tenant_isolation.py",
-        48,
-        "Cross-tenant matrix, foreign-key references, existence oracle, route coverage",
-    ),
-    SuiteFile(
-        "test_privilege_escalation.py",
-        32,
-        "Mass assignment, self-promotion, last-admin invariant, forged tokens",
+        "test_mfa.py",
+        45,
+        "TOTP against the RFC vectors, WebAuthn end to end, every replay refused",
     ),
     SuiteFile(
         "test_web.py",
         35,
         "This page, the API docs, error pages and the Content Security Policy",
+    ),
+    SuiteFile(
+        "test_privilege_escalation.py",
+        32,
+        "Mass assignment, self-promotion, last-admin invariant, forged tokens",
     ),
     SuiteFile(
         "test_login_throttling.py",
@@ -60,14 +70,14 @@ TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
         "Login auditing, spoof-proof throttling, logout everywhere, deactivation",
     ),
     SuiteFile(
-        "test_users_and_organizations.py",
-        21,
-        "Role changes, soft deactivation, database check constraints",
-    ),
-    SuiteFile(
         "test_sessions.py",
         21,
         "Refresh-token families: a replayed token ends the session, races have one winner",
+    ),
+    SuiteFile(
+        "test_users_and_organizations.py",
+        21,
+        "Role changes, soft deactivation, database check constraints",
     ),
     SuiteFile(
         "test_invitations.py",

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
-from drf_spectacular.utils import OpenApiResponse, extend_schema
+from drf_spectacular.utils import OpenApiResponse, PolymorphicProxySerializer, extend_schema
 from rest_framework import status
 from rest_framework.exceptions import AuthenticationFailed, NotAuthenticated, Throttled
 from rest_framework.generics import GenericAPIView
@@ -14,20 +14,20 @@ from rest_framework.throttling import BaseThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
-from apps.accounts import login_throttle, services
+from apps.accounts import login_throttle, services, signin
 from apps.accounts.models import User
 from apps.accounts.serializers.auth import (
     LoginSerializer,
     LogoutSerializer,
+    MfaRequiredResponseSerializer,
     PasswordChangeSerializer,
     RefreshSerializer,
     TokenPairResponseSerializer,
 )
 from apps.accounts.serializers.users import MeSerializer
-from apps.auditlogs.models import AuditAction
-from apps.auditlogs.services import record
 from apps.common.tenancy import resolve_user
 from apps.common.throttling import ClientScopedRateThrottle
+from apps.mfa import services as mfa
 
 
 def _current_user(request: Request) -> User:
@@ -60,7 +60,11 @@ class LoginView(_AuthThrottled, TokenObtainPairView):
             "ones, so accounts cannot be enumerated."
         ),
         responses={
-            200: TokenPairResponseSerializer,
+            200: PolymorphicProxySerializer(
+                component_name="LoginResult",
+                serializers=[TokenPairResponseSerializer, MfaRequiredResponseSerializer],
+                resource_type_field_name=None,
+            ),
             401: OpenApiResponse(description="Invalid credentials (deliberately generic)."),
             429: OpenApiResponse(description="Too many attempts (see `Retry-After`)."),
         },
@@ -77,12 +81,18 @@ class LoginView(_AuthThrottled, TokenObtainPairView):
         except AuthenticationFailed:
             services.record_failed_login(email, delay=decision.delay)
             raise
-        login_throttle.succeeded(decision)
         user = cast(User, serializer.user)
-        record(AuditAction.LOGIN_SUCCEEDED, actor=user, organization=user.organization)
-        response = Response(serializer.validated_data, status=status.HTTP_200_OK)
-        login_throttle.set_device_cookie(response, request, user.email)
-        return response
+        if mfa.has_mfa(user):
+            # The password was right, but the throttle bucket stays: guessing the
+            # second factor counts against it too (ADR 0004).
+            return Response(
+                {
+                    "mfa_required": True,
+                    "mfa_token": mfa.issue_challenge(user),
+                    "methods": mfa.methods(user),
+                }
+            )
+        return signin.complete(request, user, decision=decision)
 
 
 def _email_of(data: Any) -> str:

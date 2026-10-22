@@ -8,6 +8,7 @@ from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.serializers import (
     TokenObtainPairSerializer,
+    TokenObtainSerializer,
     TokenRefreshSerializer,
 )
 from rest_framework_simplejwt.settings import api_settings
@@ -30,9 +31,10 @@ class LoginSerializer(TokenObtainPairSerializer):
     # organization, so the endpoint cannot be used to enumerate accounts.
     default_error_messages = {"no_active_account": _("Invalid email or password.")}
 
-    @classmethod
-    def get_token(cls, user: Any) -> TenantRefreshToken:
-        return sessions.start(user)  # a new refresh-token family (ADR 0002)
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        """Check the credentials only. The view decides what comes next: a second
+        factor (ADR 0004) or the session itself (``apps.accounts.signin``)."""
+        return TokenObtainSerializer.validate(self, attrs)
 
 
 class RefreshSerializer(TokenRefreshSerializer):
@@ -60,6 +62,14 @@ class RefreshSerializer(TokenRefreshSerializer):
 class TokenPairResponseSerializer(serializers.Serializer[Any]):
     access = serializers.CharField()
     refresh = serializers.CharField()
+
+
+class MfaRequiredResponseSerializer(serializers.Serializer[Any]):
+    mfa_required = serializers.BooleanField(default=True)
+    mfa_token = serializers.CharField(help_text="Send to /auth/mfa/verify/ within 5 minutes.")
+    methods = serializers.ListField(
+        child=serializers.ChoiceField(choices=["totp", "webauthn", "recovery_code"])
+    )
 
 
 class LogoutSerializer(StrictSerializer):
