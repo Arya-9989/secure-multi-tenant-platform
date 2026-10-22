@@ -236,7 +236,7 @@
       <div class="tiles tiles-after reveal">
         <article class="tile tile-span-6">
           <h3 class="t-tile">One integer revokes everything.</h3>
-          <p class="t-body">Logging out everywhere, changing a password or being deactivated bumps the user&rsquo;s <code class="inline">token_version</code>. Every access and refresh token issued before it fails on the very next request. Deactivating an organization cuts off its members on their next request too. {% if password_min_length %}Passwords need at least {{ password_min_length }} characters.{% endif %}</p>
+          <p class="t-body">Logging out everywhere, changing a password or being deactivated bumps the user&rsquo;s <code class="inline">token_version</code>. Every access and refresh token issued before it fails on the very next request. Deactivating an organization does the same for all of its members, so reactivating it later doesn&rsquo;t revive old sessions. {% if password_min_length %}Passwords need at least {{ password_min_length }} characters.{% endif %}</p>
         </article>
       </div>
     </div>

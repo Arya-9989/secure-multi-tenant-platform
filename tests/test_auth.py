@@ -5,13 +5,14 @@ from typing import Any, cast
 import pytest
 from django.conf import settings
 from django.test import override_settings
+from django.urls import reverse
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken
 
 from apps.accounts.authentication import TenantRefreshToken
 from apps.accounts.models import User
 from apps.auditlogs.models import AuditAction, AuditLog
-from tests.conftest import PASSWORD, World, forge_token, token_claims
+from tests.conftest import PASSWORD, ClientFactory, World, forge_token, token_claims
 
 pytestmark = pytest.mark.django_db
 
@@ -152,6 +153,20 @@ def test_deactivation_takes_effect_on_the_next_request(world: World, api_client:
     assert member.get("/api/v1/auth/me/").status_code == 401
     assert api_client.post(REFRESH, {"refresh": tokens["refresh"]}).status_code == 401
     assert login(api_client, "member@a.test").status_code == 401
+
+
+def test_reactivating_an_organization_does_not_revive_old_sessions(
+    world: World, api_client: APIClient, client_for: ClientFactory
+) -> None:
+    tokens = login(api_client, "member@a.test").json()
+    operator = client_for(world.super_admin)
+    url = reverse("organization-detail", args=[world.org_a.pk])
+    assert operator.patch(url, {"is_active": False}).status_code == 200
+    assert operator.patch(url, {"is_active": True}).status_code == 200
+
+    assert authed(tokens["access"]).get("/api/v1/auth/me/").status_code == 401
+    assert api_client.post(REFRESH, {"refresh": tokens["refresh"]}).status_code == 401
+    assert login(api_client, "member@a.test").status_code == 200
 
 
 def test_deactivating_an_organization_cuts_off_live_sessions(

@@ -20,7 +20,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.mail import send_mail
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, QuerySet
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework_simplejwt.exceptions import TokenError
@@ -49,9 +49,14 @@ INVALID_INVITATION = "This invitation is invalid or has expired."
 # ---------------------------------------------------------------- sessions
 def revoke_all_tokens(user: User) -> None:
     """Invalidate every access and refresh token issued to ``user`` so far."""
-    User.objects.filter(pk=user.pk).update(token_version=F("token_version") + 1)
+    revoke_tokens_of(User.objects.filter(pk=user.pk))
     user.refresh_from_db(fields=["token_version"])
-    outstanding = OutstandingToken.objects.filter(user=user, blacklistedtoken__isnull=True)
+
+
+def revoke_tokens_of(users: QuerySet[User]) -> None:
+    """Invalidate every access and refresh token issued to these users so far."""
+    users.update(token_version=F("token_version") + 1)
+    outstanding = OutstandingToken.objects.filter(user__in=users, blacklistedtoken__isnull=True)
     BlacklistedToken.objects.bulk_create(
         [BlacklistedToken(token=token) for token in outstanding], ignore_conflicts=True
     )

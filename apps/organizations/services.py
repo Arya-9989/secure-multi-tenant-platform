@@ -6,6 +6,7 @@ from django.db import transaction
 from django.utils.text import slugify
 
 from apps.accounts.roles import Perm
+from apps.accounts.services import revoke_tokens_of
 from apps.auditlogs.models import AuditAction
 from apps.auditlogs.services import record
 from apps.common.guards import require_permission, require_same_tenant
@@ -59,6 +60,11 @@ def update_organization(
         for field, change in diff.items():
             setattr(organization, field, change["to"])
         organization.save(update_fields=[*diff, "updated_at"])
+        if diff.get("is_active", {}).get("to") is False:
+            # Members are cut off on their next request anyway (authentication
+            # checks the organization). Revoking their tokens as well means a
+            # later reactivation does not bring old sessions back to life.
+            revoke_tokens_of(organization.users.all())
         record(
             AuditAction.ORGANIZATION_UPDATED,
             actor=actor,
