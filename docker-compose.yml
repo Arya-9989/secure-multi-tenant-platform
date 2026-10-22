@@ -1,0 +1,70 @@
+# Local, production-like stack: gunicorn + PostgreSQL + Redis.
+#   docker compose up --build -d
+#   docker compose exec api python manage.py seed_demo --force
+#   open http://localhost:8000/api/docs/
+name: secure-multi-tenant-platform
+
+x-app-env: &app-env
+  DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-compose-local-only-secret-change-me-0123456789abcdef}
+  DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+  # Plain HTTP on localhost. In a real deployment TLS terminates at your proxy:
+  # set DJANGO_BEHIND_TLS_PROXY=True and keep the secure defaults below enabled.
+  DJANGO_SECURE_SSL_REDIRECT: "False"
+  DJANGO_SECURE_COOKIES: "False"
+  DJANGO_SECURE_HSTS_SECONDS: "0"
+  DATABASE_URL: postgres://app:app@db:5432/app
+  REDIS_URL: redis://redis:6379/0
+  LOG_FORMAT: json
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    build: .
+    command: ["python", "manage.py", "migrate", "--noinput"]
+    environment: *app-env
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: .
+    environment: *app-env
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  pgdata:
