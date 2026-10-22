@@ -23,7 +23,7 @@ from django.utils import timezone
 from django.utils.json import normalize_json
 from django.utils.module_loading import import_string
 
-from apps.common import rls
+from apps.common import rls, tracing
 from apps.tasks.models import TaskRecord, TaskStatus
 
 DEFAULT_OPTIONS: dict[str, Any] = {
@@ -70,6 +70,8 @@ class DatabaseBackend(BaseTaskBackend):
             "platform_scope": scope.platform,
             "dedupe_key": key,
             "run_after": task.run_after or timezone.now(),
+            # The worker continues this trace (ADR 0008).
+            "traceparent": tracing.current_traceparent(),
         }
         try:
             with transaction.atomic():

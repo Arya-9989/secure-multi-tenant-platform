@@ -30,6 +30,10 @@ x-app-env: &app-env
   EMAIL_HOST: mailpit
   EMAIL_PORT: "1025"
   DEFAULT_FROM_EMAIL: no-reply@platform.test
+  # Tracing (ADR 0008): off unless set, e.g.
+  #   OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318 docker compose --profile tracing up -d
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+  OTEL_SERVICE_NAME: platform-api
 
 # Migrations and operator commands connect as the schema owner.
 x-owner-env: &owner-env
@@ -87,7 +91,9 @@ services:
   worker:
     build: .
     command: ["python", "manage.py", "run_worker"]
-    environment: *app-env
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: platform-worker
     healthcheck:
       disable: true  # a worker, not a web server: the image's HTTP check does not apply
     depends_on:
@@ -197,6 +203,15 @@ services:
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
+
+  # ------------------------------------------------ tracing, local only
+  #   OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318 docker compose --profile tracing up -d
+  #   open http://localhost:16686/
+  jaeger:
+    image: jaegertracing/jaeger:2.11.0
+    profiles: ["tracing"]
+    ports:
+      - "127.0.0.1:${JAEGER_PORT:-16686}:16686"
 
 volumes:
   pgdata:

@@ -25,7 +25,7 @@ from django.utils import timezone
 from django.utils.json import normalize_json
 from django.utils.module_loading import import_string
 
-from apps.common import rls
+from apps.common import rls, tracing
 from apps.tasks.backend import DatabaseBackend, PermanentTaskError, to_result
 from apps.tasks.models import TaskRecord, TaskStatus
 
@@ -84,12 +84,19 @@ def execute(record: TaskRecord) -> TaskStatus:
     task = import_string(record.task_path)
     result = to_result(record, alias, task)
     task_started.send(type(backend()), task_result=result)
-    try:
+    attributes = {"task.name": record.task_path, "task.attempt": record.attempts}
+    if record.organization_id:
+        attributes["tenant.id"] = str(record.organization_id)
+
+    def run() -> Any:
         with rls.scope(_scope_of(record)):
             if task.takes_context:
-                value = task.call(TaskContext(task_result=result), *record.args, **record.kwargs)
-            else:
-                value = task.call(*record.args, **record.kwargs)
+                return task.call(TaskContext(task_result=result), *record.args, **record.kwargs)
+            return task.call(*record.args, **record.kwargs)
+
+    try:
+        # One trace from the request that queued the task to its end (ADR 0008).
+        value = tracing.run_in_trace(f"task {task.name}", record.traceparent, attributes, run)
     except KeyboardInterrupt:
         raise
     except BaseException as exc:

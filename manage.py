@@ -21,6 +21,11 @@ def main() -> None:
 
         rls.set_process_default(rls.PLATFORM)
 
+    # Commands such as the task worker trace too (a no-op unless configured, ADR 0008).
+    from apps.common import tracing
+
+    tracing.configure()
+
     execute_from_command_line(sys.argv)
 
 

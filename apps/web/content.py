@@ -105,6 +105,11 @@ TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
         "Immutability in the ORM and in the PostgreSQL trigger, filters",
     ),
     SuiteFile(
+        "test_tracing.py",
+        12,
+        "Spans named by route with request and tenant IDs, one trace into the worker, no PII",
+    ),
+    SuiteFile(
         "test_admin.py",
         11,
         "The Django admin: throttled, audited, no live tokens, strict CSP",

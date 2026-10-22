@@ -99,6 +99,10 @@ def bind(value: DbScope) -> None:
     ``scope()`` block restores the previous value when the request ends.
     """
     _current.set(value)
+    if value.tenant_id is not None:
+        from apps.common.tracing import set_tenant  # noqa: PLC0415 - optional at import
+
+        set_tenant(value.tenant_id)  # the request's span learns its tenant (ADR 0008)
 
 
 def set_process_default(value: DbScope) -> None:

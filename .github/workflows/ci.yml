@@ -185,12 +185,27 @@ jobs:
           grep -q '"hash":"' siem.ndjson
           docker compose exec -T api python manage.py verify_audit_chain
           docker compose run --rm migrate python manage.py audit_partitions --months-ahead 3
+      - name: One trace from the API into the worker (Jaeger)
+        env:
+          OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+        run: |
+          set -euo pipefail
+          docker compose --profile tracing up -d --wait jaeger api worker
+          ALICE=$(curl -fsS -X POST http://localhost:8000/api/v1/auth/login/             -H 'Content-Type: application/json'             -d '{"email":"alice@acme.test","password":"Demo-Passw0rd!2026"}' | jq -r .access)
+          curl -fsS -o /dev/null -X POST http://localhost:8000/api/v1/invitations/ -H "Authorization: Bearer $ALICE"             -H 'X-Request-ID: ci-trace-0000001' -H 'Content-Type: application/json'             -d '{"email":"dave@acme.test","role":"MEMBER"}'
+          for _ in $(seq 1 30); do
+            curl -fsS 'http://localhost:16686/api/traces?service=platform-api&tags=%7B%22request.id%22%3A%22ci-trace-0000001%22%7D' > traces.json || true
+            jq -e '[.data[].processes[].serviceName] | index("platform-worker")' traces.json && break
+            sleep 2
+          done
+          jq -e '[.data[].spans[].tags[] | select(.key == "tenant.id")] | length > 0' traces.json
+          jq -e '[.data[].processes[].serviceName] | index("platform-worker")' traces.json
       - name: Container logs
         if: failure()
         run: docker compose logs
       - name: Tear down
         if: always()
-        run: docker compose --profile siem down -v
+        run: docker compose --profile siem --profile tracing down -v
 
   sso-e2e:
     name: SSO end to end (Keycloak)

@@ -111,6 +111,13 @@ exactly what a nonexistent ID returns.</sub>
   invitation (`email_status`, attempts, last error). The task is idempotent and carries the
   token encrypted, never in clear; `POST /invitations/{id}/resend/` issues a new link.
   Locally, Mailpit receives everything.
+- **OpenTelemetry traces, joined to request IDs and tenants, free of personal data.** With
+  `OTEL_EXPORTER_OTLP_ENDPOINT` set, every request is a span named by its route template
+  (`POST api/v1/invitations/`) carrying `request.id` (the `X-Request-ID` value) and
+  `tenant.id`, with database, cache and IdP calls beneath it, and the task worker continues
+  the same trace. Unset, nothing is installed. No email, IP, user agent, token or query
+  string is put on a span, and a test proves it. Jaeger runs in compose
+  (`--profile tracing`) ([ADR 0008](docs/adr/0008-opentelemetry-tracing.md)).
 - **Per-account sign-in delays that can't lock you out.** On top of the per-IP limit, each
   account gets 5 free attempts and then a delay that doubles from 2 seconds to a 15-minute
   cap; attempts during a delay are refused before the password is checked. A browser that
@@ -582,7 +589,8 @@ of them explicitly.
 | `DJANGO_SECURE_HSTS_SECONDS` / `DJANGO_SECURE_HSTS_PRELOAD` | `31536000` / `False` | HSTS |
 | `DJANGO_ADMIN_URL` | `admin/` | Django admin path. Super admins only; read-only except creating and editing tenants, which goes through the audited services |
 | `API_DOCS_ENABLED` | `True` | Serve `/api/docs/`, `/api/redoc/`, `/api/schema/` (the landing page at `/` is always served and links to them only when enabled) |
-| `LOG_FORMAT` / `LOG_LEVEL` | `json` / `INFO` | `json` or `console` |
+| `LOG_FORMAT` / `LOG_LEVEL` | `json` / `INFO` | `json` or `console`. JSON lines carry `trace_id` and `span_id` while tracing |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | *(unset: tracing off)* | OTLP/HTTP collector, e.g. `http://jaeger:4318`. Also `OTEL_TRACES_EXPORTER=console`, and the standard `OTEL_SERVICE_NAME`, `OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG` |
 | `GUNICORN_WORKERS` / `GUNICORN_THREADS` / `PORT` | `min(2·CPU+1, 8)` / `2` / `8000` | Server sizing |
 
 ## Testing
@@ -626,6 +634,7 @@ PostgreSQL in CI.
 | `test_invitations.py` | Lifecycle, expiry, revocation, single use, weak passwords, sign-up races, enumeration resistance |
 | `test_audit_log.py` | Immutability (ORM, bulk inserts and upserts, PostgreSQL trigger), context capture, filters, cursor pagination |
 | `test_audit_chain.py` | Hash chains: per-tenant sequences and links, stable hashes through the JSON column, monotonic time, verification that finds modified, deleted, reordered and forged rows (even rehashed with a guessed key) and a truncated tail, 10 concurrent writers; monthly partitions and the runtime role's lack of access to them; retention with checkpoints and `--dry-run`; SIEM streaming that is signed, ordered, resumable and retried with backoff |
+| `test_tracing.py` | Server spans named by route template with `request.id` and `tenant.id`, incoming `traceparent` continued, errors marked, database spans without parameters, a request trace continued by the task worker, log lines joined to traces, no personal data on any span, and tracing as a no-op until an exporter is configured |
 | `test_admin.py` | The Django admin: throttled and audited sign-in, sessions that end with logout-all and password changes, stored tokens never shown, no un-revoking, audited tenant changes, every page under the strict CSP, fonts that swap in without moving the layout |
 | `test_users_and_organizations.py` | Role changes, soft deactivation, slugs, uniqueness, DB check constraints |
 | `test_platform.py` | Health probes, OpenAPI schema (zero warnings, validated), request IDs, JSON logs, secure settings, `seed_demo` |
@@ -637,7 +646,9 @@ pytest against a PostgreSQL 17 service, as the runtime role, with a coverage rep
 runs pip-audit over the hash-pinned lockfile export. **docker** builds the image, boots the
 compose stack and runs a cross-tenant smoke test against gunicorn, then checks with `psql`
 that neither the runtime role nor the owner sees a row without a scope, and that the API
-refuses to start as the owner. **sso-e2e** starts Keycloak (`--profile sso`) with an
+refuses to start as the owner; it also follows an invitation email through the worker to
+Mailpit, streams the audit log to Vector and verifies its chains, and finds one Jaeger trace
+spanning the API and the worker. **sso-e2e** starts Keycloak (`--profile sso`) with an
 imported realm and runs `e2e/sso_keycloak.py` inside the compose network: Alice signs in
 through Keycloak's real login form, the callback can't be replayed, an unverified email is
 refused and a Globex user can't use Acme's IdP.
@@ -658,7 +669,8 @@ docker compose --profile sso run --rm sso-e2e
 │   ├── common/          # tenancy.py, permissions.py, views.py (TenantScopedViewSet, health),
 │   │                    # middleware.py, logging.py, serializers.py (strict), guards.py, schema.py,
 │   │                    # throttling.py (client-IP rate limits), admin_site.py (hardened admin),
-│   │                    # rls.py + pgbackend/ (row-level security scope), rls_migrations.py
+│   │                    # rls.py + pgbackend/ (row-level security scope), rls_migrations.py,
+│   │                    # tracing.py (OpenTelemetry), crypto.py, principals.py
 │   ├── web/             # landing page at /, themed Swagger UI + Redoc, error pages, admin theme,
 │   │                    # CSS/JS, self-hosted fonts
 │   ├── organizations/   # Organization model, service, viewset
@@ -683,7 +695,8 @@ docker compose --profile sso run --rm sso-e2e
 ├── docker/vector/       # vector.yaml: the local SIEM stand-in (compose profile siem)
 ├── docker/keycloak/     # acme-realm.json: the local IdP's realm, client and test users
 ├── Dockerfile           # multi-stage, non-root, gunicorn, HEALTHCHECK
-├── docker-compose.yml   # api + worker + migrate + postgres + redis + mailpit (profiles: sso, siem)
+├── docker-compose.yml   # api + worker + migrate + postgres + redis + mailpit
+│                        # (profiles: sso = Keycloak, siem = Vector, tracing = Jaeger)
 ├── gunicorn.conf.py
 ├── pyproject.toml       # deps, ruff, mypy, pytest, coverage config
 └── uv.lock
@@ -759,7 +772,6 @@ None of these are implemented yet.
 
 - SAML 2.0 single sign-on, deferred: the vetted Python libraries need the `xmlsec1` native
   stack, and OIDC covers the same need with every major IdP (see ADR 0004).
-- OpenTelemetry tracing correlated with the existing request IDs.
 
 ## License
 
