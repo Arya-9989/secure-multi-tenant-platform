@@ -113,8 +113,9 @@ html[data-theme="light"],
     --button-hover-bg: #5eead4;
     --default-button-bg: #5eead4;
     --default-button-hover-bg: #2dd4bf;
-    --close-button-bg: #2c3540;
-    --close-button-hover-bg: #48525e;
+    /* Close and object tools (History) draw --button-fg on this: keep it light. */
+    --close-button-bg: #c9d1da;
+    --close-button-hover-bg: #ffffff;
     --delete-button-bg: #c4362c;
     --delete-button-hover-bg: #d9483d;
   }
@@ -159,8 +160,8 @@ html[data-theme="dark"] {
   --button-hover-bg: #5eead4;
   --default-button-bg: #5eead4;
   --default-button-hover-bg: #2dd4bf;
-  --close-button-bg: #2c3540;
-  --close-button-hover-bg: #48525e;
+  --close-button-bg: #c9d1da;
+  --close-button-hover-bg: #ffffff;
   --delete-button-bg: #c4362c;
   --delete-button-hover-bg: #d9483d;
 }
@@ -188,7 +189,7 @@ body {
 #user-tools a, .breadcrumbs a, #changelist-filter a, #changelist-filter li a,
 #result_list th a, #result_list td a, .paginator a, .xfull a, .object-tools a,
 #nav-sidebar a, .app-list a, .dashboard .module a, .actionlist a, #recent-actions-module a,
-.toplinks a, #logout-form button {
+.toplinks a, #logout-form button, .readonly a, #changelist-search a {
   display: inline-block;
   min-height: 24px;
   line-height: 24px;
