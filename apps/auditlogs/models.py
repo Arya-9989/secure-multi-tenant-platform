@@ -45,6 +45,7 @@ class AuditAction(models.TextChoices):
     USER_REACTIVATED = "user.reactivated", "User reactivated"
     INVITATION_CREATED = "invitation.created", "Invitation created"
     INVITATION_REVOKED = "invitation.revoked", "Invitation revoked"
+    INVITATION_RESENT = "invitation.resent", "Invitation resent with a new link"
     INVITATION_ACCEPTED = "invitation.accepted", "Invitation accepted"
 
 

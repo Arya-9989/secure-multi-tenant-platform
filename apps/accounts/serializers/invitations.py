@@ -29,6 +29,10 @@ class InvitationSerializer(serializers.ModelSerializer[Invitation]):
             "expires_at",
             "accepted_at",
             "revoked_at",
+            "email_status",
+            "email_attempts",
+            "email_sent_at",
+            "email_last_error",
         )
         read_only_fields: tuple[str, ...] = fields
 

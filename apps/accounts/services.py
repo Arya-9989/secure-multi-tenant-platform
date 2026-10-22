@@ -18,7 +18,6 @@ from typing import Any
 from django.conf import settings
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.core.mail import send_mail
 from django.db import IntegrityError, transaction
 from django.db.models import F, QuerySet
 from django.utils import timezone
@@ -29,6 +28,7 @@ from rest_framework_simplejwt.settings import api_settings as jwt_settings
 from apps.accounts import sessions
 from apps.accounts.authentication import TenantRefreshToken
 from apps.accounts.models import (
+    EmailStatus,
     Invitation,
     InvitationStatus,
     SessionEndReason,
@@ -40,7 +40,7 @@ from apps.accounts.roles import ASSIGNABLE_ROLES, Perm, Role
 from apps.accounts.scopes import scope_for_account, scope_for_invitation
 from apps.auditlogs.models import AuditAction
 from apps.auditlogs.services import record
-from apps.common import rls
+from apps.common import crypto, rls
 from apps.common.guards import require_permission, require_same_tenant
 from apps.organizations.models import Organization
 
@@ -289,25 +289,41 @@ def create_invitation(
             target=invitation,
             metadata={"email": email, "role": role},
         )
-        transaction.on_commit(lambda: _send_invitation_email(invitation, raw_token))
+        queue_invitation_email(invitation, raw_token)
     return invitation, raw_token
 
 
-def _send_invitation_email(invitation: Invitation, raw_token: str) -> None:
-    try:
-        send_mail(
-            subject=f"You have been invited to {invitation.organization.name}",
-            message=(
-                f"You have been invited to join {invitation.organization.name} as "
-                f"{invitation.get_role_display()}.\n\n"
-                f"Accept the invitation: {build_accept_url(raw_token)}\n\n"
-                f"This link expires at {invitation.expires_at:%Y-%m-%d %H:%M} UTC."
-            ),
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[invitation.email],
+def queue_invitation_email(invitation: Invitation, raw_token: str) -> None:
+    """Queue the email in the current transaction (ADR 0007), in the invitation's tenant.
+
+    The task's argument is the token encrypted, never the token itself.
+    """
+    from apps.accounts.tasks import send_invitation_email  # noqa: PLC0415 - import cycle
+
+    with rls.tenant_scope(invitation.organization_id):
+        send_invitation_email.enqueue(str(invitation.pk), crypto.encrypt(raw_token))
+
+
+def resend_invitation(*, actor: User, invitation: Invitation) -> tuple[Invitation, str]:
+    """A new token (the old link stops working) and a new email."""
+    require_permission(actor, Perm.INVITATION_MANAGE)
+    require_same_tenant(actor, invitation)
+    with transaction.atomic():
+        invitation = Invitation.objects.select_for_update().get(pk=invitation.pk)
+        if invitation.status != InvitationStatus.PENDING:
+            raise ValidationError({"detail": "Only pending invitations can be resent."})
+        raw_token = secrets.token_urlsafe(32)
+        invitation.token_hash = hash_invitation_token(raw_token)
+        invitation.email_status, invitation.email_last_error = EmailStatus.QUEUED, ""
+        invitation.save(update_fields=["token_hash", "email_status", "email_last_error"])
+        record(
+            AuditAction.INVITATION_RESENT,
+            actor=actor,
+            organization=invitation.organization,
+            target=invitation,
         )
-    except Exception:  # the invitation is still valid; the admin can share the link
-        logger.exception("Failed to send invitation email", extra={"invitation": invitation.pk})
+        queue_invitation_email(invitation, raw_token)
+    return invitation, raw_token
 
 
 def revoke_invitation(*, actor: User, invitation: Invitation) -> Invitation:

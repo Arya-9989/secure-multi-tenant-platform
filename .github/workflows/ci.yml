@@ -147,6 +147,22 @@ jobs:
             "http://localhost:8000/api/v1/users/$GRACE_ID/" -H "Authorization: Bearer $ALICE")
           echo "Cross-tenant read returned $STATUS"
           test "$STATUS" = "404"
+      - name: Invitation email through the worker to Mailpit
+        run: |
+          set -euo pipefail
+          ALICE=$(curl -fsS -X POST http://localhost:8000/api/v1/auth/login/ \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"alice@acme.test","password":"Demo-Passw0rd!2026"}' | jq -r .access)
+          ID=$(curl -fsS -X POST http://localhost:8000/api/v1/invitations/ -H "Authorization: Bearer $ALICE" \
+            -H 'Content-Type: application/json' -d '{"email":"carol@acme.test","role":"MEMBER"}' | jq -r .id)
+          for _ in $(seq 1 30); do
+            STATUS=$(curl -fsS "http://localhost:8000/api/v1/invitations/$ID/" -H "Authorization: Bearer $ALICE" | jq -r .email_status)
+            [ "$STATUS" = "sent" ] && break
+            sleep 1
+          done
+          echo "Invitation email: $STATUS"
+          test "$STATUS" = "sent"
+          curl -fsS http://localhost:8025/api/v1/messages | jq -e '.messages[0].To[0].Address == "carol@acme.test"'
       - name: Row-level security smoke test
         run: |
           set -euo pipefail

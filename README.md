@@ -104,6 +104,13 @@ exactly what a nonexistent ID returns.</sub>
   stored and the key is shown once. Every view declares which scope each action needs, and
   an action that declares none refuses keys. A key sees exactly its tenant, through the same
   scoping and row-level security as a person ([ADR 0005](docs/adr/0005-scoped-api-keys.md)).
+- **Invitation email from a transactional task queue.** Creating an invitation queues its
+  email in the same transaction (Django 6's task API on a database backend, ADR 0007). A
+  worker claims tasks with `SKIP LOCKED` and leases, runs each in the tenant scope it was
+  queued under, retries with exponential backoff and jitter, and records the delivery on the
+  invitation (`email_status`, attempts, last error). The task is idempotent and carries the
+  token encrypted, never in clear; `POST /invitations/{id}/resend/` issues a new link.
+  Locally, Mailpit receives everything.
 - **Per-account sign-in delays that can't lock you out.** On top of the per-IP limit, each
   account gets 5 free attempts and then a delay that doubles from 2 seconds to a 15-minute
   cap; attempts during a delay are refused before the password is checked. A browser that
@@ -185,12 +192,13 @@ Font License) from `apps/web/static/web/fonts/`.
 
 ## Quickstart
 
-### Docker (production-like: gunicorn + PostgreSQL + Redis)
+### Docker (production-like: gunicorn + worker + PostgreSQL + Redis + Mailpit)
 
 ```bash
 docker compose up --build -d --wait
 docker compose exec api python manage.py seed_demo --force
 open http://localhost:8000/                 # landing page (Swagger UI: /api/docs/, Redoc: /api/redoc/)
+open http://localhost:8025/                 # Mailpit: every invitation email the worker sends
 ```
 
 `seed_demo` creates two tenants so you can try the isolation right away. All accounts use
@@ -476,7 +484,7 @@ under `/api/`, including unknown routes, are JSON.
 | Auth | `POST auth/login/` · `POST auth/refresh/` · `POST auth/logout/` · `POST auth/logout-all/` · `GET/PATCH auth/me/` · `POST auth/password/change/` |
 | Organizations | `GET/POST organizations/` · `GET/PATCH organizations/{id}/` |
 | Users | `GET users/` (`?role=`, `?is_active=`, `?search=`) · `GET/PATCH users/{id}/` · `POST users/{id}/deactivate/` · `POST users/{id}/reactivate/` |
-| Invitations | `GET/POST invitations/` (`?status=pending\|accepted\|revoked\|expired`) · `GET invitations/{id}/` · `POST invitations/{id}/revoke/` · `POST invitations/accept/` (public) |
+| Invitations | `GET/POST invitations/` (`?status=pending\|accepted\|revoked\|expired`) · `GET invitations/{id}/` · `POST invitations/{id}/resend/` (new link, new email) · `POST invitations/{id}/revoke/` · `POST invitations/accept/` (public) |
 | Audit log | `GET audit-logs/` (`?action=`, `?actor=`, `?target_id=`, `?request_id=`, `?created_after=`, `?created_before=`, cursor-paginated) · `GET audit-logs/{id}/` |
 | Second factors | `GET auth/mfa/` · `POST auth/mfa/totp/` · `POST auth/mfa/totp/confirm/` · `POST auth/mfa/totp/disable/` · `POST auth/mfa/recovery-codes/` · `POST auth/mfa/webauthn/register/` · `POST auth/mfa/webauthn/register/complete/` · `POST auth/mfa/webauthn/{id}/remove/` · sign-in: `POST auth/mfa/verify/` · `POST auth/mfa/webauthn/begin/` · `POST auth/mfa/webauthn/complete/` |
 | API keys | `GET/POST api-keys/` · `GET api-keys/{id}/` · `POST api-keys/{id}/rotate/` (`grace_minutes`) · `POST api-keys/{id}/revoke/`. Services call the read endpoints with `Authorization: ApiKey mtk_<prefix>_<secret>` |
@@ -518,7 +526,7 @@ Audit events: `auth.login_succeeded`, `auth.login_failed`, `auth.refresh_reuse_d
 `mfa.recovery_codes_generated`, `mfa.reset`, `api_key.created`, `api_key.rotated`,
 `api_key.revoked`, `sso.provider_created`, `sso.provider_updated`,
 `sso.provider_deleted`, `audit.retention_applied`, `user.profile_updated`, `user.role_changed`, `user.deactivated`,
-`user.reactivated`, `invitation.created`, `invitation.revoked`, `invitation.accepted`.
+`user.reactivated`, `invitation.created`, `invitation.resent`, `invitation.revoked`, `invitation.accepted`.
 
 With MFA enabled, `POST auth/login/` answers a correct password with
 `{"mfa_required": true, "mfa_token": "...", "methods": ["totp", "recovery_code"]}` instead of
@@ -554,7 +562,9 @@ of them explicitly.
 | `PASSWORD_MIN_LENGTH` | `12` | Plus Django's similarity, common-password and numeric validators |
 | `INVITATION_TTL_HOURS` | `72` | Invitation expiry |
 | `FRONTEND_INVITE_URL` | `http://localhost:3000/accept-invite?token={token}` | Link placed in invitation emails |
-| `EMAIL_BACKEND` / `DEFAULT_FROM_EMAIL` | console / `no-reply@localhost` | Email delivery |
+| `EMAIL_BACKEND` / `DEFAULT_FROM_EMAIL` | console / `no-reply@localhost` | Email delivery (the compose stack uses SMTP to Mailpit) |
+| `EMAIL_HOST` / `EMAIL_PORT` / `EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` / `EMAIL_USE_TLS` / `EMAIL_TIMEOUT` | `localhost` / `25` / none / none / `False` / `10` | SMTP for the worker. Set your provider's host and credentials for live delivery; nothing is sent to real addresses by default |
+| `TASK_MAX_ATTEMPTS` / `TASK_RETRY_BASE_DELAY_SECONDS` / `TASK_RETRY_MAX_DELAY_SECONDS` / `TASK_LEASE_SECONDS` | `5` / `10` / `3600` / `300` | Background task retries (doubling with jitter) and the lease after which a dead worker's task is taken over. `manage.py prune_tasks --days 7` deletes finished tasks |
 | `FIELD_ENCRYPTION_KEYS` | *(derived from `DJANGO_SECRET_KEY`)* | Comma-separated Fernet keys for TOTP seeds and OIDC client secrets; the first encrypts, all decrypt (prepend a new key to rotate). Set it explicitly in production |
 | `MFA_ISSUER` / `MFA_CHALLENGE_TTL_SECONDS` | `Secure Multi-Tenant Platform` / `300` | Name shown in authenticator apps; lifetime of the second sign-in step |
 | `WEBAUTHN_RP_ID` / `WEBAUTHN_RP_NAME` / `WEBAUTHN_ORIGINS` | `localhost` / platform name / `http://localhost:8000` | WebAuthn relying party: your registrable domain and the exact origins your pages run on |
@@ -612,6 +622,7 @@ PostgreSQL in CI.
 | `test_mfa.py` | TOTP against the RFC 4226 and 6238 test vectors, enrolment, replay within the time step (also by racing requests), stale codes, recovery codes used once, five attempts per challenge, the account throttle, WebAuthn registration and sign-in through `py_webauthn` with a software authenticator (wrong origin, RP ID, presence, counter, replayed assertion, someone else's key), foreign key IDs answering 404, admin reset, the Django admin's code field, key rotation |
 | `test_sso.py` | OIDC against an in-process IdP that checks PKCE and client credentials: 14 forged or broken ID tokens, discovery mix-up, insecure endpoints, state and code replay, key rotation, no IdP crossing tenants or minting super admins, no just-in-time accounts, subject takeover, provider management with an encrypted, never-returned secret, the HTTP client's timeouts and errors |
 | `test_sessions.py` | Refresh-token families: a replayed token revokes the session and is audited once, identical errors, forged session claims, absolute expiry, reasons on every revocation, `prune_sessions`, 8 concurrent refreshes with one winner |
+| `test_tasks.py` | The task queue: enqueue commits or rolls back with the change, deduplication per scope, tasks run in their tenant's scope, retries with backoff until a final failure, permanent errors, leases taken over from a dead worker, priority and deferral, 4 workers racing with `SKIP LOCKED`; the invitation email: queued with the invitation, token encrypted, delivered once, skipped when revoked, retried and finally marked failed, resent with a new link that kills the old one |
 | `test_invitations.py` | Lifecycle, expiry, revocation, single use, weak passwords, sign-up races, enumeration resistance |
 | `test_audit_log.py` | Immutability (ORM, bulk inserts and upserts, PostgreSQL trigger), context capture, filters, cursor pagination |
 | `test_audit_chain.py` | Hash chains: per-tenant sequences and links, stable hashes through the JSON column, monotonic time, verification that finds modified, deleted, reordered and forged rows (even rehashed with a guessed key) and a truncated tail, 10 concurrent writers; monthly partitions and the runtime role's lack of access to them; retention with checkpoints and `--dry-run`; SIEM streaming that is signed, ordered, resumable and retried with backoff |
@@ -659,6 +670,8 @@ docker compose --profile sso run --rm sso-e2e
 │   │   │                # partitions.py, siem.py, verify_audit_chain / audit_partitions /
 │   │   │                # audit_retention / stream_audit_log commands
 │   │   └── migrations/  # 0002_append_only_trigger.py, 0008_partition_by_month.py
+│   ├── tasks/           # DatabaseBackend for django.tasks, worker (SKIP LOCKED, leases, retries),
+│   │                    # run_worker and prune_tasks commands
 │   ├── apikeys/         # ApiKey model, services (issue, rotate, revoke, authenticate), auth class
 │   ├── mfa/             # totp.py (RFC 6238), services.py (TOTP, WebAuthn, recovery codes), views
 │   └── sso/             # oidc.py (PKCE, ID-token validation), provider model, services, views
@@ -670,7 +683,7 @@ docker compose --profile sso run --rm sso-e2e
 ├── docker/vector/       # vector.yaml: the local SIEM stand-in (compose profile siem)
 ├── docker/keycloak/     # acme-realm.json: the local IdP's realm, client and test users
 ├── Dockerfile           # multi-stage, non-root, gunicorn, HEALTHCHECK
-├── docker-compose.yml   # api + migrate + postgres + redis
+├── docker-compose.yml   # api + worker + migrate + postgres + redis + mailpit (profiles: sso, siem)
 ├── gunicorn.conf.py
 ├── pyproject.toml       # deps, ruff, mypy, pytest, coverage config
 └── uv.lock
@@ -746,7 +759,6 @@ None of these are implemented yet.
 
 - SAML 2.0 single sign-on, deferred: the vetted Python libraries need the `xmlsec1` native
   stack, and OIDC covers the same need with every major IdP (see ADR 0004).
-- Asynchronous email delivery (task queue plus provider) with delivery status on invitations.
 - OpenTelemetry tracing correlated with the existing request IDs.
 
 ## License

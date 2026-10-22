@@ -86,6 +86,12 @@ MATRIX = (
         lambda w: {"email": "new@a.test", "role": "MEMBER", "organization": str(w.org_a.pk)},
     ),
     Row(
+        "invitation-resend",
+        "post",
+        lambda w: reverse("invitation-resend", args=[w.invitation_a.pk]),
+        (200, 200, 403),
+    ),
+    Row(
         "invitation-revoke",
         "post",
         lambda w: reverse("invitation-revoke", args=[w.invitation_a.pk]),

@@ -157,6 +157,15 @@ class InvitationStatus(StrEnum):
     EXPIRED = "expired"
 
 
+class EmailStatus(models.TextChoices):
+    """Delivery of the invitation email (ADR 0007)."""
+
+    QUEUED = "queued", "Queued"
+    SENT = "sent", "Sent"
+    FAILED = "failed", "Failed"
+    SKIPPED = "skipped", "Skipped (no longer pending)"
+
+
 class InvitationQuerySet(TenantQuerySet["Invitation"]):
     def open(self) -> InvitationQuerySet:
         """Neither accepted nor revoked (may still be expired)."""
@@ -196,6 +205,13 @@ class Invitation(models.Model):
     revoked_by = models.ForeignKey(
         User, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
     )
+    email_status = models.CharField(
+        max_length=16, choices=EmailStatus.choices, default=EmailStatus.QUEUED
+    )
+    email_attempts = models.PositiveSmallIntegerField(default=0)
+    email_sent_at = models.DateTimeField(null=True, blank=True)
+    email_last_error = models.CharField(max_length=200, blank=True)
+    email_message_id = models.CharField(max_length=200, blank=True)
 
     objects = InvitationQuerySet.as_manager()
 

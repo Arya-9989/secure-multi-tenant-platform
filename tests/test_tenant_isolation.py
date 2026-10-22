@@ -73,6 +73,9 @@ OBJECT_CASES = (
     ObjectCase(
         "invitation-revoke", "post", "invitation-revoke", "invitation_b", Perm.INVITATION_MANAGE
     ),
+    ObjectCase(
+        "invitation-resend", "post", "invitation-resend", "invitation_b", Perm.INVITATION_MANAGE
+    ),
     ObjectCase("auditlog-retrieve", "get", "auditlog-detail", "audit_b", Perm.AUDIT_VIEW),
     ObjectCase("user-reset-mfa", "post", "user-reset-mfa", "member_b", Perm.USER_MANAGE),
     ObjectCase("ssoprovider-retrieve", "get", "ssoprovider-detail", "sso_b", Perm.SSO_MANAGE),

@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     "apps.mfa",
     "apps.sso",
     "apps.apikeys",
+    "apps.tasks",
     "apps.web",
     # django.contrib.admin, hardened (apps.common.admin_site). Listed after
     # apps.web so that app's admin/base_site.html (theme, icon) takes precedence.
@@ -181,6 +182,26 @@ DEFAULT_FROM_EMAIL: str = env.str("DEFAULT_FROM_EMAIL", default="no-reply@localh
 EMAIL_BACKEND: str = env.str(
     "EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend"
 )
+EMAIL_HOST: str = env.str("EMAIL_HOST", default="localhost")
+EMAIL_PORT: int = env.int("EMAIL_PORT", default=25)
+EMAIL_HOST_USER: str = env.str("EMAIL_HOST_USER", default="")
+EMAIL_HOST_PASSWORD: str = env.str("EMAIL_HOST_PASSWORD", default="")
+EMAIL_USE_TLS: bool = env.bool("EMAIL_USE_TLS", default=False)
+EMAIL_TIMEOUT: int = env.int("EMAIL_TIMEOUT", default=10)
+
+# Background tasks (ADR 0007): Django's task API, stored in the database and run by
+# `manage.py run_worker`. Retries back off exponentially with jitter.
+TASKS = {
+    "default": {
+        "BACKEND": "apps.tasks.backend.DatabaseBackend",
+        "OPTIONS": {
+            "max_attempts": env.int("TASK_MAX_ATTEMPTS", default=5),
+            "base_delay": env.float("TASK_RETRY_BASE_DELAY_SECONDS", default=10.0),
+            "max_delay": env.float("TASK_RETRY_MAX_DELAY_SECONDS", default=3600.0),
+            "lease_seconds": env.int("TASK_LEASE_SECONDS", default=300),
+        },
+    }
+}
 
 # ---------------------------------------------------------------- DRF / JWT
 # Number of trusted reverse proxies in front of the app. Used both for DRF

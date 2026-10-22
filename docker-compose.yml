@@ -25,6 +25,11 @@ x-app-env: &app-env
   # plain HTTP; a real deployment leaves SSO_ALLOW_HTTP off (HTTPS required).
   SSO_ALLOW_HTTP: "True"
   SSO_CALLBACK_URL: ${SSO_CALLBACK_URL:-http://api:8000/api/v1/auth/sso/callback/}
+  # Invitation email (ADR 0007): sent by the worker to Mailpit, which keeps everything.
+  EMAIL_BACKEND: django.core.mail.backends.smtp.EmailBackend
+  EMAIL_HOST: mailpit
+  EMAIL_PORT: "1025"
+  DEFAULT_FROM_EMAIL: no-reply@platform.test
 
 # Migrations and operator commands connect as the schema owner.
 x-owner-env: &owner-env
@@ -68,6 +73,35 @@ services:
       db:
         condition: service_healthy
     restart: "no"
+
+  mailpit:
+    image: axllent/mailpit:v1.27.10
+    ports:
+      - "127.0.0.1:${MAILPIT_PORT:-8025}:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker:
+    build: .
+    command: ["python", "manage.py", "run_worker"]
+    environment: *app-env
+    healthcheck:
+      disable: true  # a worker, not a web server: the image's HTTP check does not apply
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s  # SIGTERM: it finishes the task in hand
+    restart: unless-stopped
 
   api:
     build: .

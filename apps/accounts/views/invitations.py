@@ -64,6 +64,7 @@ class InvitationViewSet(
         "retrieve": Perm.INVITATION_MANAGE,
         "create": Perm.INVITATION_MANAGE,
         "revoke": Perm.INVITATION_MANAGE,
+        "resend": Perm.INVITATION_MANAGE,
     }
     api_key_scopes = {"list": ApiScope.INVITATIONS_READ, "retrieve": ApiScope.INVITATIONS_READ}
 
@@ -71,8 +72,9 @@ class InvitationViewSet(
         summary="Invite someone to an organization",
         description=(
             "Creates a single-use invitation that expires after `INVITATION_TTL_HOURS`. "
-            "The raw token is returned **once** (and emailed); only its SHA-256 digest is "
-            "stored. Org admins can only invite into their own organization."
+            "The raw token is returned **once**; only its SHA-256 digest is stored. The "
+            "email is sent by a background worker with retries; follow it in "
+            "`email_status`. Org admins can only invite into their own organization."
         ),
         request=InvitationCreateSerializer,
         responses={201: InvitationCreatedSerializer},
@@ -91,6 +93,28 @@ class InvitationViewSet(
             "accept_url": services.build_accept_url(raw_token),
         }
         return Response(payload, status=status.HTTP_201_CREATED)
+
+    @extend_schema(
+        summary="Resend a pending invitation with a new link",
+        description=(
+            "Issues a new token (the previous link stops working) and queues a new email. "
+            "The new token is returned once, like at creation."
+        ),
+        request=None,
+        responses={200: InvitationCreatedSerializer},
+    )
+    @action(detail=True, methods=["post"])
+    def resend(self, request: Request, pk: str | None = None) -> Response:
+        invitation, raw_token = services.resend_invitation(
+            actor=self.actor, invitation=self.get_object()
+        )
+        return Response(
+            {
+                **InvitationSerializer(invitation).data,
+                "token": raw_token,
+                "accept_url": services.build_accept_url(raw_token),
+            }
+        )
 
     @extend_schema(summary="Revoke a pending invitation", request=None)
     @action(detail=True, methods=["post"])

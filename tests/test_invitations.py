@@ -14,6 +14,7 @@ from apps.accounts.models import Invitation, InvitationStatus, User, hash_invita
 from apps.accounts.roles import Role
 from apps.auditlogs.models import AuditAction, AuditLog
 from apps.common import rls
+from apps.tasks import worker
 from tests.conftest import PASSWORD, ClientFactory, World
 
 pytestmark = pytest.mark.django_db
@@ -27,14 +28,13 @@ def invite(client: APIClient, email: str, role: str = "MEMBER", **extra: Any) ->
 
 
 def test_invitation_lifecycle(
-    world: World,
-    client_for: ClientFactory,
-    api_client: APIClient,
-    django_capture_on_commit_callbacks: Any,
+    world: World, client_for: ClientFactory, api_client: APIClient
 ) -> None:
-    with django_capture_on_commit_callbacks(execute=True):
-        created = invite(client_for(world.admin_a), "New.Hire@A.test", "ORG_ADMIN")
+    created = invite(client_for(world.admin_a), "New.Hire@A.test", "ORG_ADMIN")
     assert created.status_code == 201, created.content
+    assert created.json()["email_status"] == "queued"
+    assert mail.outbox == [], "sent by the worker, not the request (ADR 0007)"
+    assert worker.drain() == 1
     body = created.json()
     token = body["token"]
     assert body["email"] == "new.hire@a.test"
@@ -168,19 +168,18 @@ def test_status_filter(world: World, client_for: ClientFactory) -> None:
 
 
 def test_email_failure_does_not_break_invitation(
-    world: World,
-    client_for: ClientFactory,
-    monkeypatch: pytest.MonkeyPatch,
-    django_capture_on_commit_callbacks: Any,
+    world: World, client_for: ClientFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def explode(*args: Any, **kwargs: Any) -> None:
         raise ConnectionError("SMTP down")
 
-    monkeypatch.setattr("apps.accounts.services.send_mail", explode)
-    with django_capture_on_commit_callbacks(execute=True):
-        response = invite(client_for(world.admin_a), "offline@a.test")
+    monkeypatch.setattr("django.core.mail.EmailMessage.send", explode)
+    response = invite(client_for(world.admin_a), "offline@a.test")
     assert response.status_code == 201
-    assert Invitation.objects.filter(email="offline@a.test").exists()
+    worker.drain()
+    invitation = Invitation.objects.get(email="offline@a.test")
+    assert (invitation.status, invitation.email_status) == ("pending", "queued")
+    assert invitation.email_last_error == "ConnectionError: SMTP down"
 
 
 def test_a_signup_race_for_the_same_email_fails_generically(
