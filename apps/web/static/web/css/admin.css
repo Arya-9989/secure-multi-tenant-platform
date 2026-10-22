@@ -1,0 +1,203 @@
+/* The Django admin in the platform's identity: slate neutrals, one teal accent,
+   Inter for text. Only Django's own CSS custom properties are redefined, plus
+   a few rules for type and touch targets, so admin upgrades keep working.
+   Mirrors the structure of admin/css/dark_mode.css: an explicit
+   data-theme from the admin's theme toggle beats the OS setting. */
+
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../fonts/InterVariable-opsz-latin.woff2") format("woff2-variations"),
+       url("../fonts/InterVariable-opsz-latin.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono Variable";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("../fonts/JetBrainsMono-wght-latin.woff2") format("woff2-variations"),
+       url("../fonts/JetBrainsMono-wght-latin.woff2") format("woff2");
+}
+
+html[data-theme="light"],
+:root {
+  --primary: #0f766e;
+  --secondary: #0b5f58;
+  --accent: #ffffff;
+  --primary-fg: #ffffff;
+
+  --body-fg: #101418;
+  --body-bg: #ffffff;
+  --body-quiet-color: #5f6975;
+  --body-medium-color: #48525e;
+  --body-loud-color: #000000;
+
+  --header-color: #a9b3bf;
+  --header-branding-color: #ffffff;
+  --header-bg: #10151b;
+  --header-link-color: #ffffff;
+
+  --breadcrumbs-fg: #48525e;
+  --breadcrumbs-link-fg: #0d6b64;
+  --breadcrumbs-bg: #f4f6f8;
+
+  --link-fg: #0d6b64;
+  --link-hover-color: #0b5f58;
+  --link-selected-fg: #0f766e;
+
+  --hairline-color: #e6e9ed;
+  --border-color: #cfd5dc;
+
+  --error-fg: #b4231a;
+  --message-success-bg: #e3f3f1;
+  --message-warning-bg: #fdf3dc;
+  --message-error-bg: #fbe9e7;
+
+  --darkened-bg: #f4f6f8;
+  --selected-bg: #e8ecef;
+  --selected-row: #e3f3f1;
+
+  --button-fg: #ffffff;
+  --button-bg: #0f766e;
+  --button-hover-bg: #0b5f58;
+  --default-button-bg: #0b5f58;
+  --default-button-hover-bg: #0f766e;
+  --close-button-bg: #5f6975;
+  --close-button-hover-bg: #48525e;
+  --delete-button-bg: #b4231a;
+  --delete-button-hover-bg: #941c15;
+
+  --font-family-primary: "Inter Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-family-monospace: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --primary: #134e4a;
+    --secondary: #0b3b38;
+    --primary-fg: #e7fbf8;
+
+    --body-fg: #f2f4f7;
+    --body-bg: #0a0d11;
+    --body-quiet-color: #a9b3bf;
+    --body-medium-color: #c9d1da;
+    --body-loud-color: #ffffff;
+
+    --header-color: #a9b3bf;
+    --header-bg: #05080b;
+
+    --breadcrumbs-fg: #a9b3bf;
+    --breadcrumbs-link-fg: #3fdcc8;
+    --breadcrumbs-bg: #10151b;
+
+    --link-fg: #3fdcc8;
+    --link-hover-color: #5eead4;
+    --link-selected-fg: #2dd4bf;
+
+    --hairline-color: #1c232b;
+    --border-color: #2c3540;
+
+    --error-fg: #ff7b70;
+    --message-success-bg: #0e3a36;
+    --message-warning-bg: #3d2f0b;
+    --message-error-bg: #3f1512;
+
+    --darkened-bg: #10151b;
+    --selected-bg: #151b22;
+    --selected-row: #0e2a28;
+
+    --button-fg: #032b27;
+    --button-bg: #2dd4bf;
+    --button-hover-bg: #5eead4;
+    --default-button-bg: #5eead4;
+    --default-button-hover-bg: #2dd4bf;
+    --close-button-bg: #2c3540;
+    --close-button-hover-bg: #48525e;
+    --delete-button-bg: #c4362c;
+    --delete-button-hover-bg: #d9483d;
+  }
+}
+
+html[data-theme="dark"] {
+  --primary: #134e4a;
+  --secondary: #0b3b38;
+  --primary-fg: #e7fbf8;
+
+  --body-fg: #f2f4f7;
+  --body-bg: #0a0d11;
+  --body-quiet-color: #a9b3bf;
+  --body-medium-color: #c9d1da;
+  --body-loud-color: #ffffff;
+
+  --header-color: #a9b3bf;
+  --header-bg: #05080b;
+
+  --breadcrumbs-fg: #a9b3bf;
+  --breadcrumbs-link-fg: #3fdcc8;
+  --breadcrumbs-bg: #10151b;
+
+  --link-fg: #3fdcc8;
+  --link-hover-color: #5eead4;
+  --link-selected-fg: #2dd4bf;
+
+  --hairline-color: #1c232b;
+  --border-color: #2c3540;
+
+  --error-fg: #ff7b70;
+  --message-success-bg: #0e3a36;
+  --message-warning-bg: #3d2f0b;
+  --message-error-bg: #3f1512;
+
+  --darkened-bg: #10151b;
+  --selected-bg: #151b22;
+  --selected-row: #0e2a28;
+
+  --button-fg: #032b27;
+  --button-bg: #2dd4bf;
+  --button-hover-bg: #5eead4;
+  --default-button-bg: #5eead4;
+  --default-button-hover-bg: #2dd4bf;
+  --close-button-bg: #2c3540;
+  --close-button-hover-bg: #48525e;
+  --delete-button-bg: #c4362c;
+  --delete-button-hover-bg: #d9483d;
+}
+
+body {
+  font-optical-sizing: auto;
+  letter-spacing: -0.006em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Header: the product mark next to the name, as on the landing page. */
+#site-name a { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; font-weight: 600; letter-spacing: -0.01em; }
+.site-mark { width: 20px; height: 20px; flex: none; color: #2dd4bf; }
+
+/* Rounded, calmer modules and buttons. */
+.module { border-radius: 12px; overflow: hidden; }
+#nav-sidebar .module, .dashboard .module { border: 1px solid var(--hairline-color); }
+.button, input[type="submit"], input[type="button"], .submit-row input, a.button { border-radius: 980px; }
+.object-tools a:link, .object-tools a:visited { border-radius: 980px; }
+
+:focus-visible { outline: 2px solid var(--link-fg); outline-offset: 2px; }
+
+/* Hit areas: at least 24x24 everywhere (WCAG 2.5.8), 44 for primary controls on touch. */
+#user-tools a, .breadcrumbs a, #changelist-filter a, #changelist-filter li a,
+#result_list th a, #result_list td a, .paginator a, .xfull a, .object-tools a,
+#nav-sidebar a, .app-list a, .dashboard .module a, .actionlist a, #recent-actions-module a,
+.toplinks a, #logout-form button {
+  display: inline-block;
+  min-height: 24px;
+  line-height: 24px;
+}
+#changelist-filter li a, #nav-sidebar th a { display: block; }
+.sortoptions a, .sortpriority { display: inline-block; min-width: 24px; min-height: 24px; text-align: center; }
+.theme-toggle, #toggle-nav-sidebar { min-width: 24px; min-height: 24px; }
+
+@media (max-width: 767px) {
+  #user-tools a, #logout-form button, .breadcrumbs a { min-height: 32px; line-height: 32px; }
+  input[type="checkbox"], input[type="radio"] { width: 24px; height: 24px; }
+}

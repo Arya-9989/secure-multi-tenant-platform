@@ -1,0 +1,23 @@
+{% extends "admin/base.html" %}
+{% load static %}
+
+{% block title %}{% if subtitle %}{{ subtitle }} | {% endif %}{{ title }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% static 'web/css/admin.css' %}">{% endblock %}
+
+{% block extrahead %}{{ block.super }}
+<link rel="icon" href="{% static 'web/favicon.svg' %}" type="image/svg+xml">
+<meta name="description" content="Operator console for the Secure Multi-Tenant Platform. Super admins only.">
+{% endblock %}
+
+{% block branding %}
+{# Signed-out pages (sign-in, signed out) have no content title, so the name is their h1. #}
+{% if user.is_anonymous %}<h1 id="site-name">{% else %}<div id="site-name">{% endif %}<a href="{% url 'admin:index' %}"><svg class="site-mark" viewBox="0 0 20 20" aria-hidden="true"><rect x="1.5" y="3" width="7.5" height="14" rx="2.4" fill="currentColor"/><rect x="11.75" y="3.75" width="6" height="12.5" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>{{ site_header|default:_('Django administration') }}</a>{% if user.is_anonymous %}</h1>{% else %}</div>{% endif %}
+{% if user.is_anonymous %}
+  {% include "admin/color_theme_toggle.html" %}
+{% endif %}
+{% endblock %}
+
+{% block nav-sidebar %}{{ block.super }}<script src="{% static 'web/js/admin-sidebar.js' %}"></script>{% endblock %}
+
+{% block nav-global %}{% endblock %}
