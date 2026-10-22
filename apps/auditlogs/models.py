@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Collection, Iterable
 from typing import Any, NoReturn
 
 from django.conf import settings
@@ -41,6 +42,20 @@ class AuditLogQuerySet(TenantQuerySet["AuditLog"]):
 
     def bulk_update(self, *args: Any, **kwargs: Any) -> NoReturn:
         raise AuditLogImmutableError("Audit log entries cannot be updated.")
+
+    def bulk_create(  # noqa: PLR0917 - the signature of QuerySet.bulk_create
+        self,
+        objs: Iterable[AuditLog],
+        batch_size: int | None = None,
+        ignore_conflicts: bool = False,
+        update_conflicts: bool = False,
+        update_fields: Collection[str] | None = None,
+        unique_fields: Collection[str] | None = None,
+    ) -> list[AuditLog]:
+        # ``update_conflicts`` turns the insert into an upsert, i.e. an update.
+        if update_conflicts:
+            raise AuditLogImmutableError("Audit log entries cannot be updated.")
+        return super().bulk_create(objs, batch_size=batch_size, ignore_conflicts=ignore_conflicts)
 
 
 class AuditLog(models.Model):

@@ -27,6 +27,18 @@ def test_entries_cannot_be_updated_through_the_orm(world: World) -> None:
         AuditLog.objects.bulk_update([entry], ["action"])
 
 
+def test_bulk_create_cannot_upsert_over_existing_entries(world: World) -> None:
+    """``INSERT ... ON CONFLICT DO UPDATE`` is an update in disguise."""
+    forged = AuditLog(id=world.audit_a.pk, action=AuditAction.LOGOUT, actor_email="x@evil.test")
+    with pytest.raises(AuditLogImmutableError):
+        AuditLog.objects.bulk_create(
+            [forged], update_conflicts=True, unique_fields=["id"], update_fields=["action"]
+        )
+    assert AuditLog.objects.get(pk=world.audit_a.pk).action == AuditAction.USER_ROLE_CHANGED
+    # Plain appends still work.
+    assert len(AuditLog.objects.bulk_create([AuditLog(action=AuditAction.LOGOUT)])) == 1
+
+
 def test_entries_cannot_be_deleted_through_the_orm(world: World) -> None:
     with pytest.raises(AuditLogImmutableError):
         world.audit_a.delete()

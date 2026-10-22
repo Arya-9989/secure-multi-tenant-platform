@@ -61,7 +61,7 @@ TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
     ),
     SuiteFile(
         "test_audit_log.py",
-        11,
+        12,
         "Immutability in the ORM and in the PostgreSQL trigger, filters",
     ),
 )
