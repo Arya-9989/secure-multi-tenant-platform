@@ -97,6 +97,7 @@
       container.dataset.specUrl,
       {
         theme: theme(),
+        nonce: container.dataset.nonce,
         scrollYOffset: ".docs-bar",
         expandResponses: "200,201",
         pathInMiddlePanel: true,

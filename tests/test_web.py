@@ -1,4 +1,4 @@
-"""The public landing page and the themed API docs."""
+"""The public landing page, the themed API docs and the Content Security Policy."""
 
 from __future__ import annotations
 
@@ -66,6 +66,24 @@ def test_pages_need_no_inline_code_or_third_party_assets(api_client: APIClient, 
     # Every script, stylesheet, font and icon is served by this app.
     for tag in re.findall(r"<(?:script|link)\b[^>]*>", html):
         assert not re.search(r"(?:src|href)=\"(?:https?:)?//", tag), tag
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("url", [*HTML_PAGES, "/api/v1/auth/me/", "/health/live/"])
+def test_strict_content_security_policy_on_every_response(api_client: APIClient, url: str) -> None:
+    policy = api_client.get(url)["Content-Security-Policy"]
+    directives = {
+        name: values
+        for name, _, values in (part.strip().partition(" ") for part in policy.split(";"))
+    }
+
+    assert directives["default-src"] == "'self'"
+    assert directives["script-src"] == "'self'"
+    assert directives["object-src"] == "'none'"
+    assert directives["base-uri"] == "'none'"
+    assert directives["frame-ancestors"] == "'none'"
+    assert "unsafe-eval" not in policy
+    assert "unsafe-inline" not in policy
 
 
 @pytest.mark.django_db

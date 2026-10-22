@@ -7,7 +7,7 @@
 <body>
 {% include "web/_docs_bar.html" with active="redoc" %}
 <main class="docs-main" id="docs-main">
-  <div id="redoc-container" data-spec-url="{{ schema_url }}"></div>
+  <div id="redoc-container" data-spec-url="{{ schema_url }}" data-nonce="{{ csp_nonce }}"></div>
   <div class="docs-loading" aria-hidden="true">
     <div class="skeleton skeleton-title"></div>
     <div class="skeleton skeleton-line"></div>

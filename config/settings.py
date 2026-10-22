@@ -12,6 +12,7 @@ from pathlib import Path
 import django_stubs_ext
 import environ
 from django.core.exceptions import ImproperlyConfigured
+from django.utils.csp import CSP
 
 # Lets Django's classes be subscripted at runtime (e.g. ``ModelAdmin[User]``).
 django_stubs_ext.monkeypatch()
@@ -58,6 +59,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "apps.common.middleware.RequestContextMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    "django.middleware.csp.ContentSecurityPolicyMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -81,6 +83,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "django.template.context_processors.csp",
             ],
         },
     },
@@ -233,6 +236,23 @@ SESSION_COOKIE_SECURE: bool = env.bool("DJANGO_SECURE_COOKIES", default=not DEBU
 CSRF_COOKIE_SECURE: bool = SESSION_COOKIE_SECURE
 SESSION_COOKIE_HTTPONLY = True
 X_FRAME_OPTIONS = "DENY"
+# One strict policy for every response: the landing page, Swagger UI, Redoc
+# and the admin load only same-origin scripts, styles and fonts, with no
+# inline code. Redoc injects its styles at runtime and indexes search in a
+# blob: worker, so its view adds a per-response style nonce and worker-src
+# (see apps.web.views.ThemedRedocView).
+SECURE_CSP = {
+    "default-src": [CSP.SELF],
+    "script-src": [CSP.SELF],
+    "style-src": [CSP.SELF],
+    "img-src": [CSP.SELF, "data:"],
+    "font-src": [CSP.SELF],
+    "connect-src": [CSP.SELF],
+    "object-src": [CSP.NONE],
+    "base-uri": [CSP.NONE],
+    "form-action": [CSP.SELF],
+    "frame-ancestors": [CSP.NONE],
+}
 DATA_UPLOAD_MAX_MEMORY_SIZE = 1024 * 1024
 ADMIN_URL: str = env.str("DJANGO_ADMIN_URL", default="admin/")
 

@@ -9,15 +9,17 @@ line from the same checks as ``/health/ready/``.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import timedelta
 from typing import Any, NamedTuple, cast
 
 from django.conf import settings
 from django.contrib.auth import password_validation
 from django.utils import timezone
+from django.utils.csp import CSP
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_control
+from django.views.decorators.csp import csp_override
 from django.views.generic import TemplateView
 from drf_spectacular.views import SpectacularRedocView, SpectacularSwaggerSplitView
 
@@ -148,6 +150,26 @@ class ThemedSwaggerView(SpectacularSwaggerSplitView):
     title = "API reference · Secure Multi-Tenant Platform"
 
 
+# Redoc renders with styled-components, which inserts <style> elements at
+# runtime, and builds its search index in a worker created from a blob: URL.
+# Its page therefore allows styles carrying this response's nonce (handed to
+# Redoc's `nonce` option) and blob: workers. Two style elements are inserted
+# as the bundle loads, before a nonce can be set, so they are allowed by hash:
+# the bundled perfect-scrollbar stylesheet and an empty element. Scripts stay
+# 'self' only. (Redoc also requests its logo from cdn.redoc.ly; img-src blocks
+# that, and Redoc then drops the image.)
+REDOC_STYLE_HASHES = (
+    "'sha256-QMIg+bpjm3JdElJ388KYke01izlUW0UoNOeKjpMxdgc='",  # perfect-scrollbar CSS
+    "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='",  # empty <style>
+)
+REDOC_CSP: Mapping[str, Sequence[str]] = {
+    **cast(Mapping[str, Sequence[str]], settings.SECURE_CSP),
+    "style-src": [CSP.SELF, CSP.NONCE, *REDOC_STYLE_HASHES],
+    "worker-src": [CSP.SELF, "blob:"],
+}
+
+
+@method_decorator(csp_override(REDOC_CSP), name="dispatch")
 class ThemedRedocView(SpectacularRedocView):
     """Redoc with the site's theme, initialised from a static script (no inline JS)."""
 
