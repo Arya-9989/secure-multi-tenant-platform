@@ -3,14 +3,14 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
-from django.db import DatabaseError, connection, transaction
+from django.db import DatabaseError, connection
 from django.db.models import ProtectedError
 from django.urls import reverse
 from django.utils import timezone
 
 from apps.auditlogs.models import AuditAction, AuditLog, AuditLogImmutableError
 from apps.auditlogs.services import record
-from tests.conftest import ClientFactory, World
+from tests.conftest import ClientFactory, World, as_schema_owner
 
 pytestmark = pytest.mark.django_db
 
@@ -57,12 +57,15 @@ def test_entries_cannot_be_deleted_through_the_orm(world: World) -> None:
     ids=["update", "delete"],
 )
 def test_database_trigger_rejects_raw_sql_mutation(world: World, sql: str) -> None:
-    with (
-        pytest.raises(DatabaseError, match="append-only"),
-        transaction.atomic(),
-        connection.cursor() as cursor,
-    ):
-        cursor.execute(sql, [world.audit_a.pk])
+    """The last of three layers. The runtime role the API uses has no UPDATE or
+    DELETE privilege, and row-level security has no policy that lets either touch a
+    row (both in ``test_row_level_security.py``). Even the schema owner with RLS
+    switched off for the table is refused by the trigger."""
+    with as_schema_owner(), connection.cursor() as cursor:
+        cursor.execute("SET CONSTRAINTS ALL IMMEDIATE")  # no pending FK checks before ALTER
+        cursor.execute("ALTER TABLE auditlogs_auditlog NO FORCE ROW LEVEL SECURITY")
+        with pytest.raises(DatabaseError, match="append-only"):
+            cursor.execute(sql, [world.audit_a.pk])
     assert AuditLog.objects.get(pk=world.audit_a.pk).action == AuditAction.USER_ROLE_CHANGED
 
 

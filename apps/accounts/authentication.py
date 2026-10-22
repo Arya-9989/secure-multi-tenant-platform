@@ -10,7 +10,8 @@ re-validates against the database:
   *and* refresh token issued before, without waiting for expiry.
 
 Authorization never trusts claims for role or tenant: those are read from
-the database row on each request.
+the database row on each request. Once the user is loaded, the request continues
+in their row-level-security scope (ADR 0001).
 """
 
 from __future__ import annotations
@@ -26,6 +27,8 @@ from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.tokens import RefreshToken, Token
 
 from apps.accounts.models import User
+from apps.accounts.scopes import scope_for_account
+from apps.common import rls
 
 TOKEN_VERSION_CLAIM = "ver"  # noqa: S105 - a claim name, not a secret
 
@@ -58,12 +61,15 @@ class TenantJWTAuthentication(JWTAuthentication):
         user_id = validated_token.get(api_settings.USER_ID_CLAIM)
         if user_id is None:
             raise InvalidToken("Token contained no recognizable user identification")
+        scope = scope_for_account(user_id=user_id)
         try:
-            user: User = User.objects.select_related("organization").get(pk=user_id)
+            with rls.scope(scope):
+                user: User = User.objects.select_related("organization").get(pk=user_id)
         except (User.DoesNotExist, ValidationError) as exc:
             raise AuthenticationFailed(_("User not found"), code="user_not_found") from exc
         if not user_can_authenticate(user):
             raise AuthenticationFailed(_("User is inactive"), code="user_inactive")
         if not token_matches_user(validated_token, user):
             raise AuthenticationFailed(_("Token has been revoked"), code="token_revoked")
+        rls.bind(scope)
         return user

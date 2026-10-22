@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
@@ -9,6 +10,7 @@ import jwt
 import pytest
 from django.conf import settings
 from django.core.cache import cache
+from django.db import connection, connections, transaction
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -17,9 +19,90 @@ from apps.accounts.models import Invitation, User, hash_invitation_token
 from apps.accounts.roles import Role
 from apps.auditlogs.models import AuditAction, AuditLog
 from apps.auditlogs.services import record
+from apps.common import rls
+from apps.common.rls_migrations import runtime_role
 from apps.organizations.models import Organization
 
 PASSWORD = "Correct-Horse-Battery-9"
+POSTGRES = connection.vendor == "postgresql"
+
+
+# ---------------------------------------------------------------- row-level security
+# On PostgreSQL the suite builds the test database as the owner, then runs every
+# test as the runtime role (Django's ``assume_role``), so the whole suite proves
+# that the application works with row-level security enforced (ADR 0001).
+@pytest.fixture(scope="session")
+def _runtime_role(django_db_blocker: Any) -> str:
+    role = runtime_role()
+    if not POSTGRES:
+        return role
+    with django_db_blocker.unblock(), connection.cursor() as cursor:
+        cursor.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", [role])
+        if cursor.fetchone() is None:
+            quoted = connection.ops.quote_name(role)
+            try:
+                cursor.execute(f"CREATE ROLE {quoted} NOLOGIN NOSUPERUSER NOBYPASSRLS")
+                cursor.execute(f"GRANT {quoted} TO CURRENT_USER")
+            except Exception as exc:  # pragma: no cover - environment problem
+                pytest.exit(f"Create the {role!r} role first (see ADR 0001): {exc}", 2)
+    connection.close()
+    return role
+
+
+@pytest.fixture(scope="session")
+def django_db_setup(
+    _runtime_role: str, django_db_setup: None, django_db_blocker: Any
+) -> Iterator[None]:
+    if not POSTGRES:
+        yield
+        return
+    options = connection.settings_dict["OPTIONS"]
+    flush = type(connection.ops).execute_sql_flush
+
+    def flush_as_owner(ops: Any, sql_list: list[str]) -> None:
+        # Flushing between transactional tests truncates every table, which only
+        # the owner may do; the runtime role never has TRUNCATE.
+        with ops.connection.cursor() as cursor:
+            cursor.execute("RESET ROLE")
+        try:
+            flush(ops, sql_list)
+        finally:
+            with ops.connection.cursor() as cursor:
+                cursor.execute(f"SET ROLE {ops.quote_name(_runtime_role)}")
+
+    setattr(type(connection.ops), "execute_sql_flush", flush_as_owner)  # noqa: B010
+    options["assume_role"] = _runtime_role
+    with django_db_blocker.unblock():
+        for conn in connections.all():
+            conn.close()
+    yield
+    options.pop("assume_role", None)
+    setattr(type(connection.ops), "execute_sql_flush", flush)  # noqa: B010
+    with django_db_blocker.unblock():
+        for conn in connections.all():
+            conn.close()
+
+
+@contextmanager
+def as_schema_owner() -> Iterator[None]:
+    """Run as the login role (the schema owner, not the runtime role), then undo it all.
+
+    Everything inside, the role switch included, is rolled back to a savepoint.
+    """
+    sid = transaction.savepoint()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SET LOCAL ROLE NONE")
+        yield
+    finally:
+        transaction.savepoint_rollback(sid)
+
+
+@pytest.fixture(autouse=True)
+def _platform_scope_for_test_code() -> Iterator[None]:
+    """Fixtures and assertions look across tenants; requests still start unscoped."""
+    with rls.platform_scope():
+        yield
 
 
 @pytest.fixture(autouse=True)

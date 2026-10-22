@@ -51,17 +51,18 @@ jobs:
       postgres:
         image: postgres:17-alpine
         env:
-          POSTGRES_DB: app
-          POSTGRES_USER: app
-          POSTGRES_PASSWORD: app
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U app -d app"
+          --health-cmd "pg_isready -U postgres"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 20
     env:
-      DATABASE_URL: postgres://app:app@localhost:5432/app
+      # The suite builds its database as the schema owner (not a superuser, so
+      # FORCE ROW LEVEL SECURITY binds it) and runs every test as the runtime role.
+      DATABASE_URL: postgres://app_owner:app_owner@localhost:5432/app
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
@@ -70,6 +71,16 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           enable-cache: true
       - run: uv sync --locked
+      - name: Database roles (owner and runtime, ADR 0001)
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE app_owner LOGIN PASSWORD 'app_owner' CREATEDB NOSUPERUSER NOBYPASSRLS;
+          CREATE ROLE app_runtime NOLOGIN NOSUPERUSER NOBYPASSRLS;
+          GRANT app_runtime TO app_owner;
+          CREATE DATABASE app OWNER app_owner;
+          SQL
       - name: pytest
         run: uv run pytest --cov --cov-report=term --cov-report=xml
       - name: Coverage summary
@@ -126,6 +137,18 @@ jobs:
             "http://localhost:8000/api/v1/users/$GRACE_ID/" -H "Authorization: Bearer $ALICE")
           echo "Cross-tenant read returned $STATUS"
           test "$STATUS" = "404"
+      - name: Row-level security smoke test
+        run: |
+          set -euo pipefail
+          count() { docker compose exec -T db psql -U "$1" -d app -tAc 'SELECT count(*) FROM accounts_user'; }
+          # Without a tenant scope, neither the API's role nor the owner sees a row.
+          test "$(count app_runtime)" = "0"
+          test "$(count app_owner)" = "0"
+          test "$(count postgres)" = "5"   # positive control: the superuser bypasses RLS
+          # The API refuses to run as a role that would bypass row-level security.
+          if docker compose run --rm --no-deps -e DATABASE_URL=postgres://app_owner:app_owner@db:5432/app               api python manage.py shell -c 'from apps.accounts.models import User; User.objects.count()'; then
+            echo "the owner role was accepted" >&2; exit 1
+          fi
       - name: Container logs
         if: failure()
         run: docker compose logs

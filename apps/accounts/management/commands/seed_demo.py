@@ -10,6 +10,7 @@ from django.db import transaction
 
 from apps.accounts.models import User
 from apps.accounts.roles import Role
+from apps.common import rls
 from apps.organizations.models import Organization
 
 DEFAULT_PASSWORD = "Demo-Passw0rd!2026"
@@ -37,12 +38,14 @@ class Command(BaseCommand):
             help="Allow running with DEBUG=False. Never use against a real deployment.",
         )
 
-    @transaction.atomic
     def handle(self, *args: Any, **options: Any) -> None:
         if not settings.DEBUG and not options["force"]:
             raise CommandError("Refusing to seed demo accounts with DEBUG=False (use --force).")
-        password: str = options["password"]
+        # Creates tenants and a super admin: platform work by definition (ADR 0001).
+        with rls.platform_scope(), transaction.atomic():
+            self._seed(options["password"])
 
+    def _seed(self, password: str) -> None:
         rows: list[tuple[str, str, str]] = []
         email, name = SUPER_ADMIN
         if not User.objects.filter(email=email).exists():

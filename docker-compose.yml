@@ -1,7 +1,11 @@
 # Local, production-like stack: gunicorn + PostgreSQL + Redis.
-#   docker compose up --build -d
+#   docker compose up --build -d --wait
 #   docker compose exec api python manage.py seed_demo --force
 #   open http://localhost:8000/api/docs/
+#
+# The database has two roles (docker/postgres/initdb/10-roles.sh, ADR 0001):
+# migrations run as the schema owner, the API as a runtime role that row-level
+# security applies to.
 name: secure-multi-tenant-platform
 
 x-app-env: &app-env
@@ -12,21 +16,33 @@ x-app-env: &app-env
   DJANGO_SECURE_SSL_REDIRECT: "False"
   DJANGO_SECURE_COOKIES: "False"
   DJANGO_SECURE_HSTS_SECONDS: "0"
-  DATABASE_URL: postgres://app:app@db:5432/app
+  # The API connects as the runtime role and refuses any role that bypasses RLS.
+  DATABASE_URL: postgres://app_runtime:${APP_DB_RUNTIME_PASSWORD:-app_runtime}@db:5432/app
+  DATABASE_REQUIRE_RLS: "True"
   REDIS_URL: redis://redis:6379/0
   LOG_FORMAT: json
+
+# Migrations and operator commands connect as the schema owner.
+x-owner-env: &owner-env
+  <<: *app-env
+  DATABASE_URL: postgres://app_owner:${APP_DB_OWNER_PASSWORD:-app_owner}@db:5432/app
+  DATABASE_REQUIRE_RLS: "False"
 
 services:
   db:
     image: postgres:17-alpine
     environment:
-      POSTGRES_DB: app
-      POSTGRES_USER: app
-      POSTGRES_PASSWORD: app
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      APP_DB_OWNER_PASSWORD: ${APP_DB_OWNER_PASSWORD:-app_owner}
+      APP_DB_RUNTIME_PASSWORD: ${APP_DB_RUNTIME_PASSWORD:-app_runtime}
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      # Over TCP: the image's init phase (which creates the roles) listens on a
+      # socket only, so this passes once the real server is up.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U app_owner -d app"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -43,7 +59,7 @@ services:
   migrate:
     build: .
     command: ["python", "manage.py", "migrate", "--noinput"]
-    environment: *app-env
+    environment: *owner-env
     depends_on:
       db:
         condition: service_healthy

@@ -8,6 +8,7 @@ from collections.abc import Callable
 
 from django.http import HttpRequest, HttpResponse
 
+from apps.common import rls
 from apps.common.context import RequestContext, bind_request_context, reset_request_context
 from apps.common.net import get_client_ip
 
@@ -36,7 +37,10 @@ class RequestContextMiddleware:
         token = bind_request_context(context)
         started = time.perf_counter()
         try:
-            response = self.get_response(request)
+            # Every request starts with no database scope and authentication binds
+            # the caller's (row-level security, ADR 0001); the block undoes it.
+            with rls.scope(rls.NO_SCOPE):
+                response = self.get_response(request)
             response[REQUEST_ID_HEADER] = request_id
             _log_access(request, response, started)
             return response

@@ -21,6 +21,8 @@ from apps.accounts.authentication import (
     user_can_authenticate,
 )
 from apps.accounts.models import User
+from apps.accounts.scopes import scope_for_account
+from apps.common import rls
 from apps.common.serializers import StrictSerializer
 
 
@@ -37,11 +39,10 @@ class RefreshSerializer(TokenRefreshSerializer):
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, str]:
         refresh = self.token_class(attrs["refresh"])
-        user = (
-            User.objects.select_related("organization")
-            .filter(pk=refresh.get(api_settings.USER_ID_CLAIM))
-            .first()
-        )
+        user_id = refresh.get(api_settings.USER_ID_CLAIM)
+        # The signature is valid, so the claim names the account to refresh for.
+        rls.bind(scope_for_account(user_id=user_id))
+        user = User.objects.select_related("organization").filter(pk=user_id).first()
         if user is None or not user_can_authenticate(user) or not token_matches_user(refresh, user):
             raise AuthenticationFailed(
                 self.error_messages["no_active_account"], "no_active_account"

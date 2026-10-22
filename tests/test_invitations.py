@@ -13,6 +13,7 @@ from apps.accounts import services
 from apps.accounts.models import Invitation, InvitationStatus, User, hash_invitation_token
 from apps.accounts.roles import Role
 from apps.auditlogs.models import AuditAction, AuditLog
+from apps.common import rls
 from tests.conftest import PASSWORD, ClientFactory, World
 
 pytestmark = pytest.mark.django_db
@@ -196,9 +197,11 @@ def test_a_signup_race_for_the_same_email_fails_generically(
     validate = services._validate_password
 
     def register_concurrently(password: str, user: User) -> None:
-        User.objects.create_user(
-            "racer@a.test", PASSWORD, role=Role.MEMBER, organization=world.org_b
-        )
+        # The other sign-up happens in another tenant, so in its own scope.
+        with rls.tenant_scope(world.org_b.pk):
+            User.objects.create_user(
+                "racer@a.test", PASSWORD, role=Role.MEMBER, organization=world.org_b
+            )
         validate(password, user)
 
     monkeypatch.setattr(services, "_validate_password", register_concurrently)

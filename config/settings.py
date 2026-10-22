@@ -97,6 +97,16 @@ DATABASES = {
 }
 DATABASES["default"]["CONN_MAX_AGE"] = env.int("DATABASE_CONN_MAX_AGE", default=60)
 DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
+# PostgreSQL row-level security (ADR 0001): this backend applies the current
+# tenant scope to every statement, and the policies fail closed without one.
+if DATABASES["default"]["ENGINE"] == "django.db.backends.postgresql":
+    DATABASES["default"]["ENGINE"] = "apps.common.pgbackend"
+# The role the API connects as. Migrations grant it data privileges; it must not
+# own the schema, be a superuser or have BYPASSRLS.
+DATABASE_RUNTIME_ROLE: str = env.str("DATABASE_RUNTIME_ROLE", default="app_runtime")
+# Refuse database connections whose role would ignore row-level security. Off
+# for migrations and operator commands, which connect as the owner.
+DATABASE_REQUIRE_RLS: bool = env.bool("DATABASE_REQUIRE_RLS", default=not DEBUG)
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REDIS_URL: str = env.str("REDIS_URL", default="")
@@ -110,6 +120,9 @@ CACHES = {
 
 # ---------------------------------------------------------------- auth
 AUTH_USER_MODEL = "accounts.User"
+# Resolves the account's tenant before loading it, so sign-in and session lookups
+# work under row-level security (apps.accounts.backends).
+AUTHENTICATION_BACKENDS = ["apps.accounts.backends.TenantModelBackend"]
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {

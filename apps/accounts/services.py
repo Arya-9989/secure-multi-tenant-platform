@@ -36,8 +36,10 @@ from apps.accounts.models import (
     normalize_email,
 )
 from apps.accounts.roles import ASSIGNABLE_ROLES, Perm, Role
+from apps.accounts.scopes import scope_for_account, scope_for_invitation
 from apps.auditlogs.models import AuditAction
 from apps.auditlogs.services import record
+from apps.common import rls
 from apps.common.guards import require_permission, require_same_tenant
 from apps.organizations.models import Organization
 
@@ -50,20 +52,25 @@ INVALID_INVITATION = "This invitation is invalid or has expired."
 def record_failed_login(email: str, *, channel: str | None = None) -> None:
     """Audit a failed sign-in (API or admin) without revealing whether the account exists."""
     email = normalize_email(email)[:254]
-    known = (
-        User.objects.select_related("organization").filter(email=email).first() if email else None
-    )
     # Attributed to the targeted account's tenant so its admins can see attacks
-    # on their users; attempts against unknown emails are platform-level.
-    metadata: dict[str, str] = {"email": email}
-    if channel:
-        metadata["channel"] = channel
-    record(
-        AuditAction.LOGIN_FAILED,
-        organization=known.organization if known else None,
-        target=known,
-        metadata=metadata,
-    )
+    # on their users; attempts against unknown emails are platform-level events,
+    # the one write before authentication that needs platform scope.
+    account_scope = scope_for_account(email=email) if email else rls.NO_SCOPE
+    with rls.scope(rls.PLATFORM if account_scope == rls.NO_SCOPE else account_scope):
+        known = (
+            User.objects.select_related("organization").filter(email=email).first()
+            if email
+            else None
+        )
+        metadata: dict[str, str] = {"email": email}
+        if channel:
+            metadata["channel"] = channel
+        record(
+            AuditAction.LOGIN_FAILED,
+            organization=known.organization if known else None,
+            target=known,
+            metadata=metadata,
+        )
 
 
 def revoke_all_tokens(user: User) -> None:
@@ -321,11 +328,20 @@ def revoke_invitation(*, actor: User, invitation: Invitation) -> Invitation:
 
 def accept_invitation(*, raw_token: str, password: str, full_name: str = "") -> User:
     invalid = ValidationError({"token": [INVALID_INVITATION]})
+    token_hash = hash_invitation_token(raw_token)
+    # Public endpoint: work in the invitation's tenant (nothing, for a bad token).
+    with rls.scope(scope_for_invitation(token_hash)):
+        return _accept_invitation(token_hash, password, full_name, invalid)
+
+
+def _accept_invitation(
+    token_hash: str, password: str, full_name: str, invalid: ValidationError
+) -> User:
     with transaction.atomic():
         invitation = (
             Invitation.objects.select_for_update(of=("self",))
             .select_related("organization")
-            .filter(token_hash=hash_invitation_token(raw_token))
+            .filter(token_hash=token_hash)
             .first()
         )
         if (

@@ -25,6 +25,11 @@ TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
         "The role table, executed for every role and for anonymous callers",
     ),
     SuiteFile(
+        "test_row_level_security.py",
+        51,
+        "Raw SQL past the ORM, no scope, a fresh connection: PostgreSQL still isolates",
+    ),
+    SuiteFile(
         "test_tenant_isolation.py",
         48,
         "Cross-tenant matrix, foreign-key references, existence oracle, route coverage",

@@ -48,6 +48,13 @@ exactly what a nonexistent ID returns.</sub>
 - **Central, fail-closed isolation.** One method, `TenantQuerySet.visible_to(user)`, decides
   which rows exist for a caller. `TenantScopedViewSet` applies it to every view and adds an
   object-level guard. Relation fields in request bodies are scoped too.
+- **Isolation enforced twice: PostgreSQL row-level security underneath.** Every tenant table
+  has `FORCE ROW LEVEL SECURITY` and policies keyed on a transaction-local `app.tenant_id`. A
+  database backend applies the caller's scope to every statement, and with no scope the
+  database shows nothing. The API connects as a role that does not own the schema, so a query
+  that forgets the application's filter (raw SQL, a new code path, a job) still cannot see or
+  change another tenant's rows. The tests prove it with raw SQL, a fresh connection and the
+  application's own checks switched off ([ADR 0001](docs/adr/0001-postgres-row-level-security.md)).
 - **Declarative RBAC.** A single role→permission matrix (`apps/accounts/roles.py`). Views
   declare `required_permissions` per action; undeclared actions are denied.
 - **Database-enforced invariants.** Check constraints guarantee that only super admins have
@@ -166,6 +173,19 @@ the password `Demo-Passw0rd!2026`:
 > `--force` is required because the container runs with `DEBUG=False`. The command refuses to
 > seed known passwords into a production-mode database otherwise.
 
+The database has two roles, created by `docker/postgres/initdb/10-roles.sh` on first start:
+`migrate` runs as the schema owner `app_owner`, and the API connects as `app_runtime`, which
+row-level security applies to. Management commands see no tenant rows unless they say
+otherwise; `seed_demo` does so itself, and any other command can be run across every tenant
+with `APP_DB_SCOPE=platform`:
+
+```bash
+docker compose exec -e APP_DB_SCOPE=platform api python manage.py createsuperuser
+```
+
+If you ran an earlier version of this stack, remove its volume first
+(`docker compose down -v`) so the roles are created.
+
 ### Local (uv + SQLite)
 
 ```bash
@@ -211,7 +231,7 @@ flowchart LR
     end
 
     gunicorn --> mw
-    svc --> pg[(PostgreSQL<br/>check constraints<br/>append-only trigger)]
+    svc --> pg[(PostgreSQL<br/>row-level security<br/>check constraints<br/>append-only trigger)]
     audit --> pg
     perms -. throttle counters .-> redis[(Redis)]
     mw -. JSON logs .-> stdout[[stdout]]
@@ -219,7 +239,7 @@ flowchart LR
 
 | App | Responsibility |
 |---|---|
-| `apps.common` | Tenancy primitives, RBAC permission classes, strict serializers, request context, JSON logging, health probes, OpenAPI error docs |
+| `apps.common` | Tenancy primitives, the row-level-security scope and the PostgreSQL backend that applies it, RBAC permission classes, strict serializers, request context, JSON logging, health probes, OpenAPI error docs |
 | `apps.organizations` | Tenants (`Organization`) and their lifecycle |
 | `apps.accounts` | Users, roles, JWT auth, sessions, invitations, `seed_demo` |
 | `apps.auditlogs` | Append-only `AuditLog`, the `record()` service, and the query API |
@@ -283,6 +303,43 @@ none, and the database enforces both rules.
 5. **Fail-closed by construction.** Anonymous, inactive or org-less callers see nothing.
    Undeclared actions are denied. A view whose queryset is not tenant-aware raises
    `ImproperlyConfigured`.
+6. **Enforced by the database as well.** Guarantees 1 and 2 hold even for code that skips
+   `visible_to()`: PostgreSQL row-level security filters every statement the API runs.
+
+### Defence in depth: row-level security
+
+The application layer gives the precise answers (`404` for a foreign ID, "does not exist"
+for a foreign reference). Row-level security is a second, independent layer underneath it, so
+that a mistake in the first one returns nothing instead of another tenant's data. The design
+is in [ADR 0001](docs/adr/0001-postgres-row-level-security.md).
+
+- **Scope per statement.** Every statement runs under one scope: a tenant, the platform, or
+  none. `apps.common.pgbackend` (a subclass of Django's PostgreSQL backend) sets it with
+  `set_config('app.tenant_id', ..., true)` inside the transaction before the first data
+  statement, again when the scope changes or a savepoint rollback reverts it, and gives a
+  statement issued outside a transaction a transaction of its own. The setting is
+  transaction-local, so nothing carries over to the next request on a pooled connection.
+- **Who sets it.** Requests start with no scope. Authentication binds the caller's scope:
+  the tenant for organization users, the platform for super admins. Pre-authentication
+  lookups (login, token refresh, admin sessions, invitation acceptance) resolve only the
+  target account's tenant in a short, explicit platform block (`apps/accounts/scopes.py`)
+  and run the rest in that tenant. Management commands have no scope unless they ask for one.
+- **Policies.** Users, invitations and the audit log are readable and writable only within
+  their organization, and a row can't be moved to another one. An organization sees only its
+  own tenant row and may lock it but not change it. The audit log has no update or delete
+  policy at all. Every protected table has `ENABLE` and `FORCE ROW LEVEL SECURITY`.
+- **Fails closed.** A missing or empty `app.tenant_id` matches no row and every write fails
+  its policy check. A malformed value is an error.
+- **Two roles.** Migrations run as the schema owner. The API connects as `app_runtime`,
+  which owns nothing, is not a superuser and has no `BYPASSRLS`. It also lacks `UPDATE`,
+  `DELETE` and `TRUNCATE` on the audit log. With `DATABASE_REQUIRE_RLS=True` (the default when
+  `DEBUG` is off) a connection whose role would bypass the policies is refused at connect time.
+- **Proven.** `tests/test_row_level_security.py` reads and writes with raw SQL past the ORM,
+  queries with no scope, opens a fresh psycopg connection that never set one, and switches
+  the application's own tenant checks off: the database still isolates. A structural test
+  fails the build if a tenant-owned model's table lacks forced RLS or a policy. The rest of
+  the suite runs as the runtime role too, so every other test also proves the application
+  works with the policies enforced.
 
 ### Threat model
 
@@ -290,6 +347,7 @@ none, and the database enforces both rules.
 |---|---|---|
 | IDOR: read or modify another tenant's object by ID | `visible_to()` in `TenantScopedViewSet.get_queryset`, `TenantObjectPermission` as a backstop, services re-check the tenant | `test_tenant_isolation.py::test_cross_tenant_object_access_is_denied` (10 endpoints × 2 roles) |
 | Leaks through list endpoints, filters or search | Scoping is applied before filter backends | `test_list_endpoints_never_return_foreign_rows` |
+| A query that skips the application's scoping (raw SQL, a new code path, a background job) | PostgreSQL row-level security with `FORCE`, a transaction-local scope applied to every statement, a runtime role that owns nothing | `test_row_level_security.py` (raw reads and writes, no scope, fresh connection, application checks switched off, structural guard) |
 | IDOR through foreign keys in request bodies | `TenantScopedPrimaryKeyRelatedField` resolves only visible objects | `test_cannot_invite_into_another_tenant_by_reference` |
 | Privilege escalation (`role=SUPER_ADMIN`, moving orgs, `is_staff`) | Strict serializers, assignable-roles allow-list, DB check constraints, no self-modification | `test_privilege_escalation.py` (mass assignment, self-promotion, `/me` tampering) |
 | Orphaning a tenant (removing its last admin) | Invariant checked under row locks (org → user lock order) | `test_last_active_org_admin_cannot_be_removed` |
@@ -309,14 +367,20 @@ none, and the database enforces both rules.
 
 **Explicitly out of scope / residual risk**
 
-- Isolation is enforced in the application. Raw SQL written by a developer bypasses it, and
-  there is no PostgreSQL row-level security yet (see roadmap).
+- Row-level security protects against mistakes, not against code that already runs
+  arbitrary SQL as the API's role: such code could set `app.platform` itself. Parameterised
+  ORM queries remain the defence against SQL injection. Unique indexes are not filtered by
+  RLS, so a colliding insert fails as an integrity error; the invitation flow turns that into
+  its generic error.
+- SQLite (local development without Docker) has no row-level security. CI and the compose
+  stack use PostgreSQL.
 - After a *single-session* logout, that session's access token stays valid for up to 5
   minutes. Use logout-all when that matters, since it revokes access tokens immediately.
 - Without `REDIS_URL`, throttle counters are kept per gunicorn worker, so the effective limit
   is multiplied by the worker count. The compose stack uses Redis.
-- The table owner can still `TRUNCATE` or drop the audit table. In production, run the app
-  under a role that does not own the schema.
+- The schema owner can still switch RLS off, `TRUNCATE` or drop the audit table. The API
+  connects as `app_runtime`, which can do none of these; keep owner credentials out of the
+  application's environment.
 
 ## Roles and permissions
 
@@ -400,7 +464,10 @@ of them explicitly.
 | `DJANGO_SECRET_KEY` | *(required unless `DJANGO_DEBUG=True`)* | Django secret; startup fails if unset in production |
 | `DJANGO_DEBUG` | `False` | Debug mode |
 | `DJANGO_ALLOWED_HOSTS` | `[]` (`localhost,127.0.0.1` in debug) | Comma-separated hosts. Include `localhost` for the container healthcheck |
-| `DATABASE_URL` | `sqlite:///db.sqlite3` | Any `dj-database-url` style URL; PostgreSQL in production |
+| `DATABASE_URL` | `sqlite:///db.sqlite3` | Any `dj-database-url` style URL; PostgreSQL in production, connecting as the runtime role |
+| `DATABASE_RUNTIME_ROLE` | `app_runtime` | The role migrations grant data privileges to. It must not own the schema, be a superuser or have `BYPASSRLS` |
+| `DATABASE_REQUIRE_RLS` | `True` (when not debug) | Refuse connections whose role would bypass row-level security. Set `False` only for migrations and operator commands that connect as the owner |
+| `APP_DB_SCOPE` | *(unset)* | `platform` lets one `manage.py` command see every tenant. Read only by `manage.py`; HTTP requests always start unscoped |
 | `DATABASE_CONN_MAX_AGE` | `60` | Persistent connection lifetime (seconds) |
 | `REDIS_URL` | *(unset → in-process cache)* | Shared cache for throttling across workers |
 | `JWT_SIGNING_KEY` | `DJANGO_SECRET_KEY` | HS256 key, ≥ 32 characters (enforced) |
@@ -423,10 +490,24 @@ of them explicitly.
 ## Testing
 
 ```bash
-uv run pytest --cov                                   # SQLite: trigger tests are skipped
-DATABASE_URL=postgres://app:app@localhost:5432/app uv run pytest --cov   # what CI runs
+uv run pytest --cov                                   # SQLite: PostgreSQL-only tests are skipped
+DATABASE_URL=postgres://app_owner:app_owner@localhost:5432/app uv run pytest --cov   # what CI runs
 uv run ruff check . && uv run ruff format --check . && uv run mypy .
 ```
+
+Against PostgreSQL the suite builds its database as the schema owner and then runs every test
+as the runtime role, so row-level security is enforced throughout. CI creates the two roles
+first; locally, as a superuser:
+
+```sql
+CREATE ROLE app_owner LOGIN PASSWORD 'app_owner' CREATEDB NOSUPERUSER NOBYPASSRLS;
+CREATE ROLE app_runtime NOLOGIN NOSUPERUSER NOBYPASSRLS;
+GRANT app_runtime TO app_owner;
+CREATE DATABASE app OWNER app_owner;
+```
+
+(Connecting as a superuser also works: the suite creates `app_runtime` itself. The owner's
+`FORCE` test is then skipped, because superusers bypass RLS.)
 
 The suite has 281 tests and 97% branch coverage (the gate is 90%). It runs against
 PostgreSQL in CI.
@@ -434,6 +515,7 @@ PostgreSQL in CI.
 | File | Focus |
 |---|---|
 | `test_tenant_isolation.py` | Cross-tenant matrix (object and list endpoints, FK references, existence oracle) plus structural coverage guards |
+| `test_row_level_security.py` | PostgreSQL row-level security: raw SQL reads and writes past the ORM, no scope and a fresh connection see nothing, the application's checks switched off, the owner bound by `FORCE`, the runtime role's privileges, savepoint bookkeeping, connection-time role checks, reversible migrations |
 | `test_permissions_matrix.py` | The roles table above, executed for every role, and anonymous access |
 | `test_privilege_escalation.py` | Mass assignment, self-promotion, super-admin protection, last-admin invariant, forged tokens |
 | `test_auth.py` | Login auditing, rotation and blacklist (including racing refreshes), logout(-all), deactivation and reactivation, throttling that a forged `X-Forwarded-For` can't dodge, password change |
@@ -446,9 +528,11 @@ PostgreSQL in CI.
 
 CI (`.github/workflows/ci.yml`) has four jobs. **lint** runs ruff, mypy (strict, with
 django-stubs and DRF stubs), the migration drift check and `check --deploy`. **test** runs
-pytest against a PostgreSQL 17 service with a coverage report. **audit** runs pip-audit over
-the hash-pinned lockfile export. **docker** builds the image, boots the compose stack and
-runs a cross-tenant smoke test against gunicorn.
+pytest against a PostgreSQL 17 service, as the runtime role, with a coverage report. **audit**
+runs pip-audit over the hash-pinned lockfile export. **docker** builds the image, boots the
+compose stack and runs a cross-tenant smoke test against gunicorn, then checks with `psql`
+that neither the runtime role nor the owner sees a row without a scope, and that the API
+refuses to start as the owner.
 
 ## Project structure
 
@@ -457,18 +541,21 @@ runs a cross-tenant smoke test against gunicorn.
 ├── apps/
 │   ├── common/          # tenancy.py, permissions.py, views.py (TenantScopedViewSet, health),
 │   │                    # middleware.py, logging.py, serializers.py (strict), guards.py, schema.py,
-│   │                    # throttling.py (client-IP rate limits), admin_site.py (hardened admin)
+│   │                    # throttling.py (client-IP rate limits), admin_site.py (hardened admin),
+│   │                    # rls.py + pgbackend/ (row-level security scope), rls_migrations.py
 │   ├── web/             # landing page at /, themed Swagger UI + Redoc, error pages, admin theme,
 │   │                    # CSS/JS, self-hosted fonts
 │   ├── organizations/   # Organization model, service, viewset
 │   ├── accounts/        # User + Invitation models, roles.py (RBAC matrix), authentication.py,
+│   │   │                # backends.py + scopes.py (sign-in under row-level security),
 │   │   ├── serializers/ # services.py (business rules), views/, management/commands/seed_demo.py
 │   │   └── views/
 │   └── auditlogs/       # AuditLog model, record() service, read-only API,
 │       └── migrations/  # 0002_append_only_trigger.py
 ├── config/              # settings.py (env-driven), test_settings.py, urls.py, wsgi/asgi
 ├── tests/               # pytest-django suite (see table above)
-├── docs/                # README hero (light/dark SVG) and screenshots/
+├── docs/                # adr/ (design decisions), README hero (light/dark SVG), screenshots/
+├── docker/postgres/     # initdb/10-roles.sh: the owner and runtime roles
 ├── Dockerfile           # multi-stage, non-root, gunicorn, HEALTHCHECK
 ├── docker-compose.yml   # api + migrate + postgres + redis
 ├── gunicorn.conf.py
@@ -484,15 +571,16 @@ and analytics simple, and it scales to many small tenants. The cost is that isol
 in code, so the code path is centralized and backed by an adversarial test suite. Schema-per-tenant
 (for example `django-tenants`) gives stronger blast-radius isolation and per-tenant
 restore, but migrations grow O(tenants) and pooling gets harder. Database-per-tenant fits
-few, large, regulated tenants. PostgreSQL row-level security is the natural next layer
-without changing the model.
+few, large, regulated tenants. PostgreSQL row-level security adds a database-enforced layer
+without changing the model ([ADR 0001](docs/adr/0001-postgres-row-level-security.md)).
 
 **Explicit `visible_to(user)` instead of a thread-local "current tenant" manager.**
 Auto-filtering default managers look elegant, but they fail *open* when the context is
 missing (background jobs, shell, tests) and they surprise people in admin and migrations.
 An explicit call that returns `none()` for anything unexpected fails *closed*. The base
 viewset makes it impossible to forget, and the structural tests make it impossible to bypass
-silently.
+silently. Row-level security keeps the same rule in the database, and it fails closed too:
+its context-free default is no scope, not the last tenant.
 
 **404 rather than 403 for foreign objects.** A 403 confirms that the ID exists. Scoping
 makes foreign rows invisible, so they 404 like random IDs. A 403 is reserved for "your role
@@ -538,8 +626,6 @@ the prototype are not upgradable in place.
 
 None of these are implemented yet.
 
-- PostgreSQL row-level security policies keyed on a per-transaction tenant setting, as a
-  second, database-enforced isolation layer.
 - Refresh-token families with reuse detection, revoking the whole family when a rotated
   token is replayed.
 - Per-account login throttling with progressive delays, alongside the per-IP limit.
