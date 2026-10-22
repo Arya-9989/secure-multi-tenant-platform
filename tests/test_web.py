@@ -273,7 +273,7 @@ STORY_STEPS = (
     ("Request", "Alice asks for Grace."),
     ("Tenant resolve", "The tenant comes from the database."),
     ("Scoped query", "Only Acme&rsquo;s rows exist."),
-    ("404", "Not forbidden. Absent."),
+    ("404 Not Found", "Not forbidden. Absent."),
 )
 
 
