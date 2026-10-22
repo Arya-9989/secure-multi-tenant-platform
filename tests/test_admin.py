@@ -83,6 +83,18 @@ def test_admin_sign_ins_are_audited(world: World, client: Client) -> None:
     assert succeeded.metadata == {"channel": "admin"}
 
 
+def test_a_failed_sign_in_counts_as_failed_even_with_a_live_session(
+    world: World, operator: Client
+) -> None:
+    """Success is judged by the sign-in itself, not by who the session already belongs to."""
+    response = operator.post(
+        reverse("admin:login"), {"username": "root@platform.test", "password": "wrong"}
+    )
+    assert response.status_code == 200
+    assert AuditLog.objects.filter(action=AuditAction.LOGIN_FAILED).count() == 1
+    assert not AuditLog.objects.filter(action=AuditAction.LOGIN_SUCCEEDED).exists()
+
+
 # ---------------------------------------------------------------- sessions
 def test_logging_out_everywhere_ends_admin_sessions_too(world: World, operator: Client) -> None:
     assert operator.get(reverse("admin:index")).status_code == 200

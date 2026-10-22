@@ -12,7 +12,7 @@ from typing import Any
 from django.contrib import admin
 from django.contrib.auth import update_session_auth_hash
 from django.db import transaction
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.template.response import TemplateResponse
 
 from apps.accounts import services
@@ -40,8 +40,10 @@ class PlatformAdminSite(admin.AdminSite):
             return too_many_requests(request, throttle.wait())
 
         response = super().login(request, extra_context)
+        # A valid sign-in redirects; a rejected one re-renders the form. (request.user
+        # alone is not enough: the session may already belong to someone.)
         user = resolve_user(request.user)
-        if user is not None:
+        if isinstance(response, HttpResponseRedirect) and user is not None:
             record(
                 AuditAction.LOGIN_SUCCEEDED,
                 actor=user,
