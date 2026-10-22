@@ -1,0 +1,108 @@
+[project]
+name = "secure-multi-tenant-platform"
+version = "1.0.0"
+description = "Multi-tenant Django REST Framework backend with centrally enforced tenant isolation, RBAC, invitations and an append-only audit log."
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Arya Mahindrakar" }]
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "django>=5.2,<6.1",
+    "djangorestframework>=3.16",
+    "djangorestframework-simplejwt>=5.5",
+    "django-filter>=25.1",
+    "drf-spectacular[sidecar]>=0.28",
+    "django-environ>=0.12",
+    "psycopg[binary]>=3.2",
+    "gunicorn>=23.0",
+    "whitenoise>=6.9",
+    "redis>=5.2",
+    "django-stubs-ext>=6.0,<6.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-django>=4.10",
+    "pytest-cov>=6.0",
+    "ruff>=0.11",
+    "mypy>=1.15",
+    "django-stubs[compatible-mypy]>=6.0,<6.1",
+    "djangorestframework-stubs[compatible-mypy]>=3.16",
+    "pip-audit>=2.9",
+]
+
+[tool.uv]
+package = false
+
+# ---------------------------------------------------------------- ruff
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["**/migrations/*.py"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F", "I", "B", "UP", "S", "DJ", "C4", "SIM", "RUF", "PT", "PL", "RET", "TID", "ERA",
+]
+ignore = [
+    "PLR0913",  # Django/DRF signatures legitimately take many args
+    "PLR2004",  # magic numbers are fine in HTTP status assertions
+    "RUF012",   # DRF/Django class attributes are mutable by convention
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "PLR0915"]
+"apps/accounts/management/**" = ["S105"]
+"manage.py" = ["PLC0415"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["apps", "config"]
+
+# ---------------------------------------------------------------- mypy
+[tool.mypy]
+python_version = "3.12"
+plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
+strict = true
+warn_unreachable = true
+disallow_subclassing_any = false
+disallow_untyped_decorators = false
+exclude = ["/migrations/"]
+
+[[tool.mypy.overrides]]
+module = ["environ.*", "django_filters.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# drf-spectacular's extension base classes are untyped.
+module = ["apps.accounts.schema", "apps.common.schema"]
+disallow_untyped_calls = false
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+[tool.django-stubs]
+django_settings_module = "config.test_settings"
+
+# ---------------------------------------------------------------- pytest
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.test_settings"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+filterwarnings = [
+    "error::RuntimeWarning",
+    "ignore:No directory at:UserWarning",  # whitenoise: collectstatic is not run for tests
+]
+
+[tool.coverage.run]
+source = ["apps", "config"]
+branch = true
+omit = ["*/migrations/*", "config/asgi.py", "config/wsgi.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+fail_under = 90
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError"]

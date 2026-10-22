@@ -1,7 +1,30 @@
-venv/
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+.venv/
+venv/
+
+# Tooling
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Django
+*.sqlite3
+staticfiles/
+media/
+
+# Secrets
 .env
-db.sqlite3
+.env.*
+!.env.example
+
+# Editors / OS
 .idea/
 .vscode/
+.DS_Store
+Thumbs.db
