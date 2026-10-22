@@ -5,7 +5,7 @@ from typing import Any, cast
 
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status
-from rest_framework.exceptions import AuthenticationFailed, NotAuthenticated
+from rest_framework.exceptions import AuthenticationFailed, NotAuthenticated, Throttled
 from rest_framework.generics import GenericAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
@@ -14,7 +14,7 @@ from rest_framework.throttling import BaseThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
-from apps.accounts import services
+from apps.accounts import login_throttle, services
 from apps.accounts.models import User
 from apps.accounts.serializers.auth import (
     LoginSerializer,
@@ -51,31 +51,43 @@ class LoginView(_AuthThrottled, TokenObtainPairView):
         tags=["auth"],
         summary="Obtain an access/refresh token pair",
         description=(
-            "Rate-limited per client (`THROTTLE_AUTH`). Every attempt is written to the audit "
-            "log; failures use one generic message so accounts cannot be enumerated."
+            "Rate-limited per client (`THROTTLE_AUTH`) and per account: after "
+            "`LOGIN_ACCOUNT_FREE_ATTEMPTS` attempts, each further one waits for a doubling "
+            "delay (capped at `LOGIN_ACCOUNT_MAX_DELAY_SECONDS`). A browser that signed in "
+            "to the account before carries a `login_device` cookie and is counted on its own, "
+            "so nobody can keep you out of your own devices. Every attempt is audited; "
+            "failures use one generic message and unknown emails behave exactly like real "
+            "ones, so accounts cannot be enumerated."
         ),
         responses={
             200: TokenPairResponseSerializer,
             401: OpenApiResponse(description="Invalid credentials (deliberately generic)."),
-            429: OpenApiResponse(description="Too many attempts."),
+            429: OpenApiResponse(description="Too many attempts (see `Retry-After`)."),
         },
         auth=[],
     )
     def post(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        email = _email_of(request.data)
+        decision = login_throttle.check(email, login_throttle.device_token_from(request))
+        if not decision.allowed:
+            raise Throttled(wait=decision.retry_after)
         serializer = cast(LoginSerializer, self.get_serializer(data=request.data))
         try:
             serializer.is_valid(raise_exception=True)
         except AuthenticationFailed:
-            _record_failed_login(request.data)
+            services.record_failed_login(email, delay=decision.delay)
             raise
+        login_throttle.succeeded(decision)
         user = cast(User, serializer.user)
         record(AuditAction.LOGIN_SUCCEEDED, actor=user, organization=user.organization)
-        return Response(serializer.validated_data, status=status.HTTP_200_OK)
+        response = Response(serializer.validated_data, status=status.HTTP_200_OK)
+        login_throttle.set_device_cookie(response, request, user.email)
+        return response
 
 
-def _record_failed_login(data: Any) -> None:
-    email = str(data.get("email", "")) if isinstance(data, Mapping) else ""
-    services.record_failed_login(email)
+def _email_of(data: Any) -> str:
+    value = data.get("email", "") if isinstance(data, Mapping) else ""
+    return value if isinstance(value, str) else ""
 
 
 class RefreshView(_AuthThrottled, TokenRefreshView):

@@ -189,9 +189,10 @@ def _auth_limit() -> int:
 
 
 def test_login_is_throttled(world: World, api_client: APIClient) -> None:
+    """Per client, across accounts (the per-account limit is in test_login_throttling.py)."""
     limit = _auth_limit()
-    for _ in range(limit):
-        assert login(api_client, "member@a.test", "wrong").status_code == 401
+    for attempt in range(limit):
+        assert login(api_client, f"probe{attempt}@a.test", "wrong").status_code == 401
     response = login(api_client, "member@a.test")  # even correct credentials
     assert response.status_code == 429
     assert "Retry-After" in response.headers
@@ -207,7 +208,7 @@ def test_login_throttle_ignores_a_spoofed_forwarded_for(
     limit = _auth_limit()
     for attempt in range(limit):
         spoofed = {"HTTP_X_FORWARDED_FOR": f"203.0.113.{attempt}"}
-        assert login(api_client, "member@a.test", "wrong", **spoofed).status_code == 401
+        assert login(api_client, f"probe{attempt}@a.test", "wrong", **spoofed).status_code == 401
     response = login(api_client, "member@a.test", HTTP_X_FORWARDED_FOR="198.51.100.250")
     assert response.status_code == 429
 
@@ -220,7 +221,7 @@ def test_behind_a_trusted_proxy_the_throttle_keys_on_the_address_it_appended(
     for attempt in range(limit):
         # The client controls everything left of the address our proxy appended.
         chain = {"HTTP_X_FORWARDED_FOR": f"203.0.113.{attempt}, 198.51.100.7"}
-        assert login(api_client, "member@a.test", "wrong", **chain).status_code == 401
+        assert login(api_client, f"probe{attempt}@a.test", "wrong", **chain).status_code == 401
     attacker = {"HTTP_X_FORWARDED_FOR": "203.0.113.99, 198.51.100.7"}
     assert login(api_client, "member@a.test", **attacker).status_code == 429
     # A different client behind the same proxy has its own budget.

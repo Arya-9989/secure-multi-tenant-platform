@@ -50,7 +50,7 @@ INVALID_INVITATION = "This invitation is invalid or has expired."
 
 
 # ---------------------------------------------------------------- sessions
-def record_failed_login(email: str, *, channel: str | None = None) -> None:
+def record_failed_login(email: str, *, channel: str | None = None, delay: int = 0) -> None:
     """Audit a failed sign-in (API or admin) without revealing whether the account exists."""
     email = normalize_email(email)[:254]
     # Attributed to the targeted account's tenant so its admins can see attacks
@@ -63,9 +63,11 @@ def record_failed_login(email: str, *, channel: str | None = None) -> None:
             if email
             else None
         )
-        metadata: dict[str, str] = {"email": email}
+        metadata: dict[str, str | int] = {"email": email}
         if channel:
             metadata["channel"] = channel
+        if delay:  # this failure started a per-account delay (ADR 0003)
+            metadata["next_attempt_delay"] = delay
         record(
             AuditAction.LOGIN_FAILED,
             organization=known.organization if known else None,

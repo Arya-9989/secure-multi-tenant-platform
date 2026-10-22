@@ -55,8 +55,8 @@ def operator(world: World, client: Client) -> Client:
 # ---------------------------------------------------------------- sign-in
 def test_admin_login_is_throttled_like_the_api(world: World, client: Client) -> None:
     url = reverse("admin:login")
-    for _ in range(_auth_limit()):
-        response = client.post(url, {"username": "root@platform.test", "password": "wrong"})
+    for attempt in range(_auth_limit()):
+        response = client.post(url, {"username": f"probe{attempt}@x.test", "password": "wrong"})
         assert response.status_code == 200  # the form, redisplayed with an error
 
     response = client.post(url, {"username": "root@platform.test", "password": PASSWORD})

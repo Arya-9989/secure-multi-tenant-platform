@@ -132,6 +132,13 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
+# Per-account sign-in throttling (ADR 0003): free attempts, then a doubling delay.
+LOGIN_ACCOUNT_FREE_ATTEMPTS: int = env.int("LOGIN_ACCOUNT_FREE_ATTEMPTS", default=5)
+LOGIN_ACCOUNT_BASE_DELAY_SECONDS: int = env.int("LOGIN_ACCOUNT_BASE_DELAY_SECONDS", default=2)
+LOGIN_ACCOUNT_MAX_DELAY_SECONDS: int = env.int("LOGIN_ACCOUNT_MAX_DELAY_SECONDS", default=900)
+LOGIN_ACCOUNT_WINDOW_SECONDS: int = env.int("LOGIN_ACCOUNT_WINDOW_SECONDS", default=86_400)
+LOGIN_DEVICE_TRUST_DAYS: int = env.int("LOGIN_DEVICE_TRUST_DAYS", default=90)
+
 INVITATION_TTL = timedelta(hours=env.int("INVITATION_TTL_HOURS", default=72))
 FRONTEND_INVITE_URL: str = env.str(
     "FRONTEND_INVITE_URL", default="http://localhost:3000/accept-invite?token={token}"

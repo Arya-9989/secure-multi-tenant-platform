@@ -45,6 +45,11 @@ TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
         "This page, the API docs, error pages and the Content Security Policy",
     ),
     SuiteFile(
+        "test_login_throttling.py",
+        27,
+        "Per-account delays a botnet can't dodge and a stranger can't lock you out with",
+    ),
+    SuiteFile(
         "test_platform.py",
         24,
         "Health probes, OpenAPI schema, request IDs, JSON logs, secure settings",

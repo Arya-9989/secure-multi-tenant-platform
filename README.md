@@ -82,6 +82,14 @@ exactly what a nonexistent ID returns.</sub>
 - **Rate limits a client can't dodge.** Every throttle keys on the same client IP the audit
   log records, and `X-Forwarded-For` counts only behind `NUM_PROXIES` trusted proxies. The
   Django admin sign-in shares the API's credential limit and is audited the same way.
+- **Per-account sign-in delays that can't lock you out.** On top of the per-IP limit, each
+  account gets 5 free attempts and then a delay that doubles from 2 seconds to a 15-minute
+  cap; attempts during a delay are refused before the password is checked. A browser that
+  has signed in to the account before carries an HttpOnly `login_device` cookie and is
+  counted on its own, so a stranger hammering your email from a botnet slows down guessing
+  but cannot keep you out of your own devices. Unknown emails are throttled exactly like real
+  ones, and a burst of parallel attempts gets no more than sequential ones would
+  ([ADR 0003](docs/adr/0003-per-account-login-throttling.md)).
 
 ## Landing page and API docs
 
@@ -360,8 +368,10 @@ is in [ADR 0001](docs/adr/0001-postgres-row-level-security.md).
 | Refresh-token replay, stolen sessions | Refresh-token families: a rotated token that comes back revokes the whole session, both copies, and is audited. Rotation is a compare-and-swap, so racing requests can't fork a session. Access tokens die with their session. Logout, logout-all, `token_version` bump on password change or deactivation | `test_sessions.py` (`test_replaying_a_rotated_token_revokes_the_whole_session`, `test_concurrent_refreshes_with_one_token_have_exactly_one_winner` with 8 threads), `test_auth.py` |
 | Deactivated user or org keeps working until token expiry | User and org `is_active` checked on every request and refresh. Deactivating an org revokes its members' tokens, so reactivating it doesn't revive old sessions | `test_deactivation_takes_effect_on_the_next_request`, `test_deactivating_an_organization_cuts_off_live_sessions`, `test_reactivating_an_organization_does_not_revive_old_sessions` |
 | Credential brute force | 10/min per-client throttle on API login, admin sign-in, refresh, password change and invitation accept, plus audited failures | `test_login_is_throttled`, `test_admin_login_is_throttled_like_the_api` |
+| Distributed guessing against one account (a fresh IP per request) | Per-account buckets: 5 free attempts, then delays doubling to 15 minutes, refused attempts never evaluated; race-safe under bursts | `test_login_throttling.py` (`test_a_distributed_attack_meets_doubling_delays`, `test_a_burst_gets_exactly_the_attempts_the_policy_allows`, Redis variant in CI) |
+| Locking a victim out by failing on their behalf | No hard lockout; devices that signed in before carry a signed device token and are counted separately; a stolen device token buys only that device's budget; operators can clear a bucket | `test_the_victim_still_gets_into_their_own_device`, `test_a_stolen_device_token_buys_only_that_devices_budget`, `test_operators_can_clear_an_accounts_delay` |
 | Dodging the rate limit with a forged `X-Forwarded-For` | Throttles key on the audited client IP (`get_client_ip`), which ignores the header unless `NUM_PROXIES` > 0 and then takes the address the outermost trusted proxy appended | `test_login_throttle_ignores_a_spoofed_forwarded_for`, `test_behind_a_trusted_proxy_the_throttle_keys_on_the_address_it_appended` |
-| Account enumeration | One generic login error. Invitation acceptance fails generically, including when another sign-up takes the address mid-request. Inviting an email registered in another tenant reveals nothing | `test_failed_logins_are_generic_and_audited`, `test_no_cross_tenant_email_enumeration`, `test_a_signup_race_for_the_same_email_fails_generically` |
+| Account enumeration | One generic login error, and unknown emails are delayed exactly like real ones. Invitation acceptance fails generically, including when another sign-up takes the address mid-request. Inviting an email registered in another tenant reveals nothing | `test_failed_logins_are_generic_and_audited`, `test_unknown_emails_are_throttled_exactly_like_real_ones`, `test_no_cross_tenant_email_enumeration`, `test_a_signup_race_for_the_same_email_fails_generically` |
 | Invitation tokens leaked from the DB | Only a SHA-256 digest is stored. Tokens are single-use and expire after 72h | `test_invitation_lifecycle`, `test_unusable_tokens_fail_generically` |
 | Audit tampering | Model, QuerySet (including `bulk_create` upserts) and admin are read-only. A PostgreSQL `BEFORE UPDATE OR DELETE` trigger blocks raw SQL. Actors with history cannot be hard-deleted (`PROTECT`) | `test_audit_log.py` (incl. `test_database_trigger_rejects_raw_sql_mutation`, `test_bulk_create_cannot_upsert_over_existing_entries`) |
 | The Django admin as a side door | Sign-in throttled and audited like the API. Logging out everywhere, deactivation and an admin password change end admin sessions and API tokens alike. Sessions are listed without any token or token ID, and can't be edited or deleted, so none can be revived. Tenant changes go through the audited services, and tenants can't be deleted | `test_admin.py` |
@@ -380,6 +390,10 @@ is in [ADR 0001](docs/adr/0001-postgres-row-level-security.md).
   stack use PostgreSQL.
 - Without `REDIS_URL`, throttle counters are kept per gunicorn worker, so the effective limit
   is multiplied by the worker count. The compose stack uses Redis.
+- Someone who knows a victim's email can delay that victim's sign-ins **from new devices**
+  (up to 15 minutes between attempts) and compete for the one attempt allowed when a delay
+  ends. Devices that signed in before are unaffected and there is never a hard lock;
+  `clear_login_throttle` and SSO are the escape hatches (ADR 0003).
 - The schema owner can still switch RLS off, `TRUNCATE` or drop the audit table. The API
   connects as `app_runtime`, which can do none of these; keep owner credentials out of the
   application's environment.
@@ -482,6 +496,8 @@ of them explicitly.
 | `FRONTEND_INVITE_URL` | `http://localhost:3000/accept-invite?token={token}` | Link placed in invitation emails |
 | `EMAIL_BACKEND` / `DEFAULT_FROM_EMAIL` | console / `no-reply@localhost` | Email delivery |
 | `THROTTLE_AUTH` / `THROTTLE_ANON` / `THROTTLE_USER` | `10/min` / `60/min` / `600/min` | Rate limits |
+| `LOGIN_ACCOUNT_FREE_ATTEMPTS` / `LOGIN_ACCOUNT_BASE_DELAY_SECONDS` / `LOGIN_ACCOUNT_MAX_DELAY_SECONDS` | `5` / `2` / `900` | Per-account sign-in delays: free attempts, the first delay (it doubles), the cap |
+| `LOGIN_ACCOUNT_WINDOW_SECONDS` / `LOGIN_DEVICE_TRUST_DAYS` | `86400` / `90` | How long failed attempts are remembered; how long a device token is honoured. `manage.py clear_login_throttle <email>` clears an account's delay |
 | `NUM_PROXIES` | `0` | Trusted proxies in front of the app. Decides the client IP for the audit log and for every rate limit |
 | `DJANGO_BEHIND_TLS_PROXY` | `False` | Trust `X-Forwarded-Proto: https` |
 | `DJANGO_SECURE_SSL_REDIRECT` / `DJANGO_SECURE_COOKIES` | `True` (when not debug) | HTTPS redirect, secure cookies |
@@ -523,6 +539,7 @@ PostgreSQL in CI.
 | `test_permissions_matrix.py` | The roles table above, executed for every role, and anonymous access |
 | `test_privilege_escalation.py` | Mass assignment, self-promotion, super-admin protection, last-admin invariant, forged tokens |
 | `test_auth.py` | Login auditing, rotation, logout(-all), deactivation and reactivation, throttling that a forged `X-Forwarded-For` can't dodge, password change |
+| `test_login_throttling.py` | Per-account delays against a distributed attacker, device tokens (the victim gets in, a stolen one buys little, forged and expired ones count as strangers), identical behaviour for unknown emails, bursts of 20 threads, the admin, the operator command, Redis |
 | `test_sessions.py` | Refresh-token families: a replayed token revokes the session and is audited once, identical errors, forged session claims, absolute expiry, reasons on every revocation, `prune_sessions`, 8 concurrent refreshes with one winner |
 | `test_invitations.py` | Lifecycle, expiry, revocation, single use, weak passwords, sign-up races, enumeration resistance |
 | `test_audit_log.py` | Immutability (ORM, bulk upserts and PostgreSQL trigger), context capture, filters, cursor pagination |
@@ -636,7 +653,6 @@ the prototype are not upgradable in place.
 
 None of these are implemented yet.
 
-- Per-account login throttling with progressive delays, alongside the per-IP limit.
 - MFA (TOTP/WebAuthn) and SSO via OIDC/SAML for organization admins.
 - Audit log streaming to a SIEM, time-based partitioning and retention, and hash-chaining
   for tamper evidence beyond the database.
