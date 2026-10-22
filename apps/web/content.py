@@ -66,7 +66,7 @@ TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
     ),
     SuiteFile(
         "test_admin.py",
-        10,
+        11,
         "The Django admin: throttled, audited, no live tokens, strict CSP",
     ),
 )

@@ -20,6 +20,25 @@
   src: url("../fonts/JetBrainsMono-wght-latin.woff2") format("woff2-variations"),
        url("../fonts/JetBrainsMono-wght-latin.woff2") format("woff2");
 }
+/* Metric-matched fallbacks (as in tokens.css), so the swap to the web fonts
+   moves nothing: without them the swap shifted the header and every
+   changelist by up to 0.023 CLS. */
+@font-face {
+  font-family: "Inter Fallback";
+  src: local("Arial"), local("Helvetica Neue"), local("Helvetica");
+  size-adjust: 107.12%;
+  ascent-override: 90.44%;
+  descent-override: 22.52%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: "JetBrains Mono Fallback";
+  src: local("Consolas"), local("Menlo"), local("Courier New");
+  size-adjust: 109%;
+  ascent-override: 93.6%;
+  descent-override: 27.5%;
+  line-gap-override: 0%;
+}
 
 html[data-theme="light"],
 :root {
@@ -69,8 +88,8 @@ html[data-theme="light"],
   --delete-button-bg: #b4231a;
   --delete-button-hover-bg: #941c15;
 
-  --font-family-primary: "Inter Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-family-monospace: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-family-primary: "Inter Variable", "Inter Fallback", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-family-monospace: "JetBrains Mono Variable", "JetBrains Mono Fallback", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
 @media (prefers-color-scheme: dark) {

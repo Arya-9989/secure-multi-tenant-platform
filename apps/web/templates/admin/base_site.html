@@ -6,6 +6,7 @@
 {% block extrastyle %}{{ block.super }}<link rel="stylesheet" href="{% static 'web/css/admin.css' %}">{% endblock %}
 
 {% block extrahead %}{{ block.super }}
+<link rel="preload" href="{% static 'web/fonts/InterVariable-opsz-latin.woff2' %}" as="font" type="font/woff2" crossorigin>
 <link rel="icon" href="{% static 'web/favicon.svg' %}" type="image/svg+xml">
 <meta name="description" content="Operator console for the Secure Multi-Tenant Platform. Super admins only.">
 {% endblock %}
