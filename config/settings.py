@@ -145,16 +145,18 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",),
     "DEFAULT_PARSER_CLASSES": ("rest_framework.parsers.JSONParser",),
     "DEFAULT_SCHEMA_CLASS": "apps.common.schema.AutoSchema",
+    # Keyed on the same client IP as the audit log (see apps.common.throttling).
     "DEFAULT_THROTTLE_CLASSES": (
-        "rest_framework.throttling.AnonRateThrottle",
-        "rest_framework.throttling.UserRateThrottle",
+        "apps.common.throttling.ClientAnonRateThrottle",
+        "apps.common.throttling.ClientUserRateThrottle",
     ),
     "DEFAULT_THROTTLE_RATES": {
         "anon": env.str("THROTTLE_ANON", default="60/min"),
         "user": env.str("THROTTLE_USER", default="600/min"),
         "auth": env.str("THROTTLE_AUTH", default="10/min"),
     },
-    "NUM_PROXIES": NUM_PROXIES or None,
+    # 0, not None: DRF treats None as "trust X-Forwarded-For as sent".
+    "NUM_PROXIES": NUM_PROXIES,
     "TEST_REQUEST_DEFAULT_FORMAT": "json",
 }
 

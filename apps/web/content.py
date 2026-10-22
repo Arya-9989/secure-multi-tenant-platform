@@ -45,19 +45,19 @@ TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
         "Role changes, soft deactivation, database check constraints",
     ),
     SuiteFile(
-        "test_web.py",
-        19,
-        "This page, the themed API docs and the Content Security Policy",
+        "test_auth.py",
+        20,
+        "Rotation races, spoof-proof throttling, logout everywhere, deactivation",
     ),
     SuiteFile(
-        "test_auth.py",
-        18,
-        "Rotation and blacklist, logout everywhere, deactivation, throttling",
+        "test_web.py",
+        19,
+        "This page, the API docs, error pages and the Content Security Policy",
     ),
     SuiteFile(
         "test_invitations.py",
         14,
-        "Lifecycle, expiry, single use, enumeration resistance",
+        "Lifecycle, expiry, single use, sign-up races, enumeration resistance",
     ),
     SuiteFile(
         "test_audit_log.py",

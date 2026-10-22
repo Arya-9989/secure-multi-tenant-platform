@@ -10,7 +10,7 @@ from rest_framework.generics import GenericAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.throttling import BaseThrottle, ScopedRateThrottle
+from rest_framework.throttling import BaseThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
@@ -27,6 +27,7 @@ from apps.accounts.serializers.users import MeSerializer
 from apps.auditlogs.models import AuditAction
 from apps.auditlogs.services import record
 from apps.common.tenancy import resolve_user
+from apps.common.throttling import ClientScopedRateThrottle
 
 
 def _current_user(request: Request) -> User:
@@ -38,7 +39,7 @@ def _current_user(request: Request) -> User:
 
 class _AuthThrottled:
     # Brute-force protection: a strict per-client rate on credential endpoints.
-    throttle_classes: Sequence[type[BaseThrottle]] = (ScopedRateThrottle,)
+    throttle_classes: Sequence[type[BaseThrottle]] = (ClientScopedRateThrottle,)
     throttle_scope = "auth"
 
 

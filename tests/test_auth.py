@@ -4,6 +4,7 @@ from typing import Any, cast
 
 import pytest
 from django.conf import settings
+from django.test import override_settings
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken
 
@@ -162,14 +163,50 @@ def test_deactivating_an_organization_cuts_off_live_sessions(
     assert api_client.post(REFRESH, {"refresh": tokens["refresh"]}).status_code == 401
 
 
-def test_login_is_throttled(world: World, api_client: APIClient) -> None:
+def _auth_limit() -> int:
     rates = cast(dict[str, Any], settings.REST_FRAMEWORK)["DEFAULT_THROTTLE_RATES"]
-    limit = int(rates["auth"].split("/")[0])
+    return int(rates["auth"].split("/")[0])
+
+
+def test_login_is_throttled(world: World, api_client: APIClient) -> None:
+    limit = _auth_limit()
     for _ in range(limit):
         assert login(api_client, "member@a.test", "wrong").status_code == 401
     response = login(api_client, "member@a.test")  # even correct credentials
     assert response.status_code == 429
     assert "Retry-After" in response.headers
+
+
+def test_login_throttle_ignores_a_spoofed_forwarded_for(
+    world: World, api_client: APIClient
+) -> None:
+    """Without a trusted proxy, X-Forwarded-For is attacker-controlled.
+
+    A fresh value per request must not buy a fresh throttle budget.
+    """
+    limit = _auth_limit()
+    for attempt in range(limit):
+        spoofed = {"HTTP_X_FORWARDED_FOR": f"203.0.113.{attempt}"}
+        assert login(api_client, "member@a.test", "wrong", **spoofed).status_code == 401
+    response = login(api_client, "member@a.test", HTTP_X_FORWARDED_FOR="198.51.100.250")
+    assert response.status_code == 429
+
+
+@override_settings(NUM_PROXIES=1)
+def test_behind_a_trusted_proxy_the_throttle_keys_on_the_address_it_appended(
+    world: World, api_client: APIClient
+) -> None:
+    limit = _auth_limit()
+    for attempt in range(limit):
+        # The client controls everything left of the address our proxy appended.
+        chain = {"HTTP_X_FORWARDED_FOR": f"203.0.113.{attempt}, 198.51.100.7"}
+        assert login(api_client, "member@a.test", "wrong", **chain).status_code == 401
+    attacker = {"HTTP_X_FORWARDED_FOR": "203.0.113.99, 198.51.100.7"}
+    assert login(api_client, "member@a.test", **attacker).status_code == 429
+    # A different client behind the same proxy has its own budget.
+    other = {"HTTP_X_FORWARDED_FOR": "198.51.100.8"}
+    assert login(api_client, "member@a.test", **other).status_code == 200
+    assert AuditLog.objects.filter(ip_address="198.51.100.8").exists()
 
 
 # ---------------------------------------------------------------- profile & password

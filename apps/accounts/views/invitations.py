@@ -8,7 +8,6 @@ from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from apps.accounts import services
@@ -21,6 +20,7 @@ from apps.accounts.serializers.invitations import (
     InvitationSerializer,
 )
 from apps.accounts.serializers.users import UserSerializer
+from apps.common.throttling import ClientScopedRateThrottle
 from apps.common.views import TenantScopedViewSet
 
 
@@ -103,7 +103,7 @@ class AcceptInvitationView(APIView):
 
     authentication_classes = ()
     permission_classes = (AllowAny,)
-    throttle_classes = (ScopedRateThrottle,)
+    throttle_classes = (ClientScopedRateThrottle,)
     throttle_scope = "auth"
 
     @extend_schema(
