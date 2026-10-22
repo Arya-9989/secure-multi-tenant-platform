@@ -196,7 +196,9 @@ SPECTACULAR_SETTINGS = {
     "SWAGGER_UI_FAVICON_HREF": "SIDECAR",
     "REDOC_DIST": "SIDECAR",
     "SWAGGER_UI_SETTINGS": {
-        "deepLinking": True,
+        # Deep links render an <a> inside each operation's toggle <button>,
+        # which nests interactive controls (axe: nested-interactive).
+        "deepLinking": False,
         "persistAuthorization": True,
         "displayRequestDuration": True,
         "filter": True,

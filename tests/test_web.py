@@ -1,4 +1,4 @@
-"""The public landing page."""
+"""The public landing page and the themed API docs."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from apps.auditlogs.models import AuditAction
 from apps.web.content import TEST_SUITE
 from apps.web.views import PERMISSION_LABELS, Quantity, humanize_duration, humanize_rate
 
-HTML_PAGES = ("/",)
+HTML_PAGES = ("/", "/api/docs/", "/api/redoc/")
 
 
 @pytest.mark.django_db
@@ -66,6 +66,19 @@ def test_pages_need_no_inline_code_or_third_party_assets(api_client: APIClient, 
     # Every script, stylesheet, font and icon is served by this app.
     for tag in re.findall(r"<(?:script|link)\b[^>]*>", html):
         assert not re.search(r"(?:src|href)=\"(?:https?:)?//", tag), tag
+
+
+@pytest.mark.django_db
+def test_swagger_init_script_is_served_separately(api_client: APIClient) -> None:
+    page = api_client.get("/api/docs/").content.decode()
+    script_url = re.search(r'<script src="(/api/docs/\?[^"]*script[^"]*)"', page)
+    assert script_url, "the init script must be an external, same-origin file"
+
+    script = api_client.get(script_url.group(1).replace("&amp;", "&"))
+
+    assert script.status_code == 200
+    assert script["Content-Type"].startswith("application/javascript")
+    assert "SwaggerUIBundle(" in script.content.decode()
 
 
 @pytest.mark.parametrize(

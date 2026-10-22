@@ -1,0 +1,28 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  {% include "web/_docs_head.html" %}
+  <link rel="stylesheet" href="{{ swagger_ui_css }}">
+  <link rel="stylesheet" href="{% static 'web/css/docs.css' %}">
+  <script src="{% static 'web/js/docs-theme.js' %}"></script>
+</head>
+<body>
+{% include "web/_docs_bar.html" with active="swagger" %}
+<div class="docs-main" id="docs-main">
+  <div id="swagger-ui"></div>
+  <div class="docs-loading" aria-hidden="true">
+    <div class="skeleton skeleton-title"></div>
+    <div class="skeleton skeleton-line"></div>
+    <div class="skeleton skeleton-line"></div>
+    <div class="skeleton skeleton-gap"></div>
+    <div class="skeleton skeleton-row"></div>
+    <div class="skeleton skeleton-row"></div>
+    <div class="skeleton skeleton-row"></div>
+    <div class="skeleton skeleton-row"></div>
+  </div>
+  <noscript><p class="docs-noscript">Swagger UI needs JavaScript. The raw schema is at <a href="{% url 'schema' %}">{% url 'schema' %}</a>.</p></noscript>
+</div>
+<script src="{{ swagger_ui_bundle }}"></script>
+<script src="{{ script_url }}"></script>
+</body>
+</html>

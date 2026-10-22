@@ -1,0 +1,24 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  {% include "web/_docs_head.html" %}
+  <link rel="stylesheet" href="{% static 'web/css/docs.css' %}">
+</head>
+<body>
+{% include "web/_docs_bar.html" with active="redoc" %}
+<main class="docs-main" id="docs-main">
+  <div id="redoc-container" data-spec-url="{{ schema_url }}"></div>
+  <div class="docs-loading" aria-hidden="true">
+    <div class="skeleton skeleton-title"></div>
+    <div class="skeleton skeleton-line"></div>
+    <div class="skeleton skeleton-line"></div>
+    <div class="skeleton skeleton-gap"></div>
+    <div class="skeleton skeleton-row"></div>
+    <div class="skeleton skeleton-row"></div>
+  </div>
+  <noscript><p class="docs-noscript">Redoc needs JavaScript. The raw schema is at <a href="{% url 'schema' %}">{% url 'schema' %}</a>.</p></noscript>
+</main>
+<script src="{{ redoc_standalone }}" defer></script>
+<script src="{% static 'web/js/redoc-init.js' %}" defer></script>
+</body>
+</html>

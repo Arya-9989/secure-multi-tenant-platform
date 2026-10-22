@@ -1,4 +1,4 @@
-"""The public landing page.
+"""The public landing page and the themed Swagger UI / Redoc views.
 
 The landing page explains the security model. Wherever possible it renders
 facts from the running code instead of repeating them: the role matrix comes
@@ -19,6 +19,7 @@ from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_control
 from django.views.generic import TemplateView
+from drf_spectacular.views import SpectacularRedocView, SpectacularSwaggerSplitView
 
 from apps.accounts.roles import ROLE_PERMISSIONS, Perm, Role
 from apps.auditlogs.models import AuditAction
@@ -134,3 +135,21 @@ class LandingView(TemplateView):
             suite=suite_inventory(),
         )
         return context
+
+
+class ThemedSwaggerView(SpectacularSwaggerSplitView):
+    """Swagger UI with the site's type, colours and dark mode.
+
+    The split view serves the init script from a URL instead of inlining it,
+    so the page runs under ``script-src 'self'``.
+    """
+
+    template_name = "web/swagger_ui.html"
+    title = "API reference · Secure Multi-Tenant Platform"
+
+
+class ThemedRedocView(SpectacularRedocView):
+    """Redoc with the site's theme, initialised from a static script (no inline JS)."""
+
+    template_name = "web/redoc.html"
+    title = "API reference · Secure Multi-Tenant Platform"

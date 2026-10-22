@@ -50,14 +50,14 @@ TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
         "Rotation and blacklist, logout everywhere, deactivation, throttling",
     ),
     SuiteFile(
+        "test_web.py",
+        14,
+        "This page and the themed API docs: facts from code, no inline code",
+    ),
+    SuiteFile(
         "test_invitations.py",
         14,
         "Lifecycle, expiry, single use, enumeration resistance",
-    ),
-    SuiteFile(
-        "test_web.py",
-        11,
-        "This page: facts rendered from code, status, no inline code",
     ),
     SuiteFile(
         "test_audit_log.py",
