@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from collections.abc import Iterator
 from enum import StrEnum
 from typing import Any, ClassVar
 
+from django.conf import settings
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
 from django.db.models import Q
 from django.db.models.functions import Lower
 from django.utils import timezone
+from django.utils.crypto import salted_hmac
 
 from apps.accounts.roles import ASSIGNABLE_ROLE_CHOICES, ASSIGNABLE_ROLES, Role
 from apps.common.tenancy import TenantQuerySet
@@ -122,6 +125,24 @@ class User(AbstractBaseUser, PermissionsMixin):
     @property
     def tenant_id(self) -> uuid.UUID | None:
         return self.organization_id
+
+    # Django ends a user's admin sessions when their password hash changes. Mixing in
+    # token_version extends that to everything else that revokes their API tokens:
+    # logging out everywhere, deactivation, an organization being switched off.
+    def get_session_auth_hash(self) -> str:
+        return self._session_auth_hash()
+
+    def get_session_auth_fallback_hash(self) -> Iterator[str]:
+        for secret in settings.SECRET_KEY_FALLBACKS:
+            yield self._session_auth_hash(secret)
+
+    def _session_auth_hash(self, secret: str | bytes | None = None) -> str:
+        return salted_hmac(
+            "apps.accounts.models.User.get_session_auth_hash",
+            f"{self.password}:{self.token_version}",
+            secret=secret,
+            algorithm="sha256",
+        ).hexdigest()
 
 
 def hash_invitation_token(raw_token: str) -> str:

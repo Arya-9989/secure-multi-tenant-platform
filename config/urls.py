@@ -51,9 +51,6 @@ if settings.API_DOCS_ENABLED:
         path("api/redoc/", ThemedRedocView.as_view(url_name="schema"), name="redoc"),
     ]
 
-admin.site.site_header = "Secure Multi-Tenant Platform"
-admin.site.site_title = "Platform admin"
-
 # Branded pages for people, DRF-style JSON under /api/ (see apps.web.errors).
 handler400 = "apps.web.errors.bad_request"
 handler403 = "apps.web.errors.permission_denied"

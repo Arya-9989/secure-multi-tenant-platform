@@ -47,6 +47,25 @@ INVALID_INVITATION = "This invitation is invalid or has expired."
 
 
 # ---------------------------------------------------------------- sessions
+def record_failed_login(email: str, *, channel: str | None = None) -> None:
+    """Audit a failed sign-in (API or admin) without revealing whether the account exists."""
+    email = normalize_email(email)[:254]
+    known = (
+        User.objects.select_related("organization").filter(email=email).first() if email else None
+    )
+    # Attributed to the targeted account's tenant so its admins can see attacks
+    # on their users; attempts against unknown emails are platform-level.
+    metadata: dict[str, str] = {"email": email}
+    if channel:
+        metadata["channel"] = channel
+    record(
+        AuditAction.LOGIN_FAILED,
+        organization=known.organization if known else None,
+        target=known,
+        metadata=metadata,
+    )
+
+
 def revoke_all_tokens(user: User) -> None:
     """Invalidate every access and refresh token issued to ``user`` so far."""
     revoke_tokens_of(User.objects.filter(pk=user.pk))

@@ -10,11 +10,14 @@ always agree on who the client is.
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 from django.http import HttpRequest
 from rest_framework.request import Request
 from rest_framework.throttling import (
     AnonRateThrottle,
     ScopedRateThrottle,
+    SimpleRateThrottle,
     UserRateThrottle,
 )
 
@@ -36,3 +39,16 @@ class ClientUserRateThrottle(ClientIPIdentMixin, UserRateThrottle):
 
 class ClientScopedRateThrottle(ClientIPIdentMixin, ScopedRateThrottle):
     pass
+
+
+class AdminLoginThrottle(ClientIPIdentMixin, SimpleRateThrottle):
+    """The API's credential rate (``THROTTLE_AUTH``) applied to Django admin sign-ins."""
+
+    scope = "auth"
+
+    def get_cache_key(self, request: Any, view: Any) -> str:
+        return self.cache_format % {"scope": "admin-login", "ident": self.get_ident(request)}
+
+    def allows(self, request: HttpRequest) -> bool:
+        """Count one attempt; ``False`` once the client is over the rate."""
+        return self.allow_request(cast(Any, request), cast(Any, None))

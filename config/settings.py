@@ -36,7 +36,6 @@ ALLOWED_HOSTS: list[str] = env.list(
 CSRF_TRUSTED_ORIGINS: list[str] = env.list("DJANGO_CSRF_TRUSTED_ORIGINS", default=[])
 
 INSTALLED_APPS = [
-    "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
@@ -54,6 +53,9 @@ INSTALLED_APPS = [
     "apps.accounts",
     "apps.auditlogs",
     "apps.web",
+    # django.contrib.admin, hardened (apps.common.admin_site). Listed after
+    # apps.web so that app's admin/base_site.html (theme, icon) takes precedence.
+    "apps.common.apps.PlatformAdminConfig",
 ]
 
 MIDDLEWARE = [

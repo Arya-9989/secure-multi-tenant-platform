@@ -15,7 +15,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from apps.accounts import services
-from apps.accounts.models import User, normalize_email
+from apps.accounts.models import User
 from apps.accounts.serializers.auth import (
     LoginSerializer,
     LogoutSerializer,
@@ -74,18 +74,8 @@ class LoginView(_AuthThrottled, TokenObtainPairView):
 
 
 def _record_failed_login(data: Any) -> None:
-    email = normalize_email(str(data.get("email", "")))[:254] if isinstance(data, Mapping) else ""
-    known = (
-        User.objects.select_related("organization").filter(email=email).first() if email else None
-    )
-    # Attributed to the targeted account's tenant so its admins can see attacks
-    # on their users; attempts against unknown emails are platform-level.
-    record(
-        AuditAction.LOGIN_FAILED,
-        organization=known.organization if known else None,
-        target=known,
-        metadata={"email": email},
-    )
+    email = str(data.get("email", "")) if isinstance(data, Mapping) else ""
+    services.record_failed_login(email)
 
 
 class RefreshView(_AuthThrottled, TokenRefreshView):
