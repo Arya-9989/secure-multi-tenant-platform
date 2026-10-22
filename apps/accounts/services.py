@@ -25,12 +25,13 @@ from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.settings import api_settings as jwt_settings
-from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 
+from apps.accounts import sessions
 from apps.accounts.authentication import TenantRefreshToken
 from apps.accounts.models import (
     Invitation,
     InvitationStatus,
+    SessionEndReason,
     User,
     hash_invitation_token,
     normalize_email,
@@ -73,38 +74,37 @@ def record_failed_login(email: str, *, channel: str | None = None) -> None:
         )
 
 
-def revoke_all_tokens(user: User) -> None:
+def revoke_all_tokens(user: User, reason: SessionEndReason) -> None:
     """Invalidate every access and refresh token issued to ``user`` so far."""
-    revoke_tokens_of(User.objects.filter(pk=user.pk))
+    revoke_tokens_of(User.objects.filter(pk=user.pk), reason)
     user.refresh_from_db(fields=["token_version"])
 
 
-def revoke_tokens_of(users: QuerySet[User]) -> None:
+def revoke_tokens_of(users: QuerySet[User], reason: SessionEndReason) -> None:
     """Invalidate every access and refresh token issued to these users so far."""
     users.update(token_version=F("token_version") + 1)
-    outstanding = OutstandingToken.objects.filter(user__in=users, blacklistedtoken__isnull=True)
-    BlacklistedToken.objects.bulk_create(
-        [BlacklistedToken(token=token) for token in outstanding], ignore_conflicts=True
-    )
+    sessions.end_all(users, reason)
 
 
 def logout(user: User, raw_refresh_token: str) -> None:
+    """End the session the refresh token belongs to; its access tokens die with it."""
     invalid = ValidationError({"refresh": ["Token is invalid or expired."]})
     try:
         token = TenantRefreshToken(raw_refresh_token)  # type: ignore[arg-type]
     except TokenError as exc:
         raise invalid from exc
-    # Never let one user blacklist another user's session.
+    # Never let one user end another user's session.
     if str(token.get(jwt_settings.USER_ID_CLAIM)) != str(user.pk):
         raise invalid
     with transaction.atomic():
-        token.blacklist()
+        if not sessions.end(user, token, SessionEndReason.LOGOUT):
+            raise invalid
         record(AuditAction.LOGOUT, actor=user, organization=user.organization)
 
 
 def logout_everywhere(user: User) -> None:
     with transaction.atomic():
-        revoke_all_tokens(user)
+        revoke_all_tokens(user, SessionEndReason.LOGOUT_ALL)
         record(AuditAction.LOGOUT_ALL, actor=user, organization=user.organization)
 
 
@@ -115,7 +115,7 @@ def change_password(user: User, *, current_password: str, new_password: str) -> 
     with transaction.atomic():
         user.set_password(new_password)
         user.save(update_fields=["password", "updated_at"])
-        revoke_all_tokens(user)
+        revoke_all_tokens(user, SessionEndReason.PASSWORD_CHANGED)
         record(
             AuditAction.PASSWORD_CHANGED, actor=user, organization=user.organization, target=user
         )
@@ -205,7 +205,7 @@ def deactivate_user(*, actor: User, target: User) -> User:
         target.is_active = False
         target.deactivated_at = timezone.now()
         target.save(update_fields=["is_active", "deactivated_at", "updated_at"])
-        revoke_all_tokens(target)
+        revoke_all_tokens(target, SessionEndReason.USER_DEACTIVATED)
         record(
             AuditAction.USER_DEACTIVATED,
             actor=actor,

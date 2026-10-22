@@ -16,6 +16,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.template.response import TemplateResponse
 
 from apps.accounts import services
+from apps.accounts.models import SessionEndReason
 from apps.auditlogs.models import AuditAction
 from apps.auditlogs.services import record
 from apps.common.tenancy import resolve_user
@@ -63,7 +64,7 @@ class PlatformAdminSite(admin.AdminSite):
         user = resolve_user(request.user)
         if request.method == "POST" and response.status_code == 302 and user is not None:
             with transaction.atomic():
-                services.revoke_all_tokens(user)
+                services.revoke_all_tokens(user, SessionEndReason.PASSWORD_CHANGED)
                 record(
                     AuditAction.PASSWORD_CHANGED,
                     actor=user,

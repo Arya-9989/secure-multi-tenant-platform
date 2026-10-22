@@ -86,7 +86,9 @@ class RefreshView(_AuthThrottled, TokenRefreshView):
         summary="Rotate the refresh token",
         description=(
             "Returns a new access token **and a new refresh token**. The submitted refresh "
-            "token is blacklisted and cannot be used again."
+            "token can never be used again: presenting a rotated token is treated as theft, "
+            "ends the whole session (every token from that sign-in) and is audited. Serialise "
+            "refreshes in clients; two concurrent refreshes with one token end the session."
         ),
         responses={200: TokenPairResponseSerializer},
         auth=[],
@@ -102,7 +104,10 @@ class LogoutView(GenericAPIView[Any]):
     @extend_schema(
         tags=["auth"],
         summary="Log out this session",
-        description="Blacklists the given refresh token. It must belong to the caller.",
+        description=(
+            "Ends the session the refresh token belongs to, including its access tokens. "
+            "The token must belong to the caller."
+        ),
         responses={204: None},
     )
     def post(self, request: Request) -> Response:

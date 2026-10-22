@@ -15,6 +15,10 @@ from apps.common.tenancy import TenantQuerySet
 class AuditAction(models.TextChoices):
     LOGIN_SUCCEEDED = "auth.login_succeeded", "Login succeeded"
     LOGIN_FAILED = "auth.login_failed", "Login failed"
+    REFRESH_TOKEN_REUSE_DETECTED = (
+        "auth.refresh_reuse_detected",
+        "Refresh token replayed; session revoked",
+    )
     LOGOUT = "auth.logout", "Logout"
     LOGOUT_ALL = "auth.logout_all", "Logout from all sessions"
     PASSWORD_CHANGED = "auth.password_changed", "Password changed"

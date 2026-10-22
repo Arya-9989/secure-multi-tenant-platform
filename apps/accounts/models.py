@@ -233,3 +233,72 @@ class Invitation(models.Model):
         if self.expires_at <= timezone.now():
             return InvitationStatus.EXPIRED
         return InvitationStatus.PENDING
+
+
+class SessionEndReason(models.TextChoices):
+    LOGOUT = "logout", "Logged out"
+    LOGOUT_ALL = "logout_all", "Logged out everywhere"
+    REUSE_DETECTED = "reuse_detected", "A rotated refresh token was replayed"
+    PASSWORD_CHANGED = "password_changed", "Password changed"
+    USER_DEACTIVATED = "user_deactivated", "User deactivated"
+    ORGANIZATION_DEACTIVATED = "organization_deactivated", "Organization deactivated"
+
+
+class RefreshTokenFamilyQuerySet(TenantQuerySet["RefreshTokenFamily"]):
+    def live(self) -> RefreshTokenFamilyQuerySet:
+        return self.filter(revoked_at__isnull=True, expires_at__gt=timezone.now())
+
+
+class RefreshTokenFamily(models.Model):
+    """One login session: every refresh token rotated from one sign-in (ADR 0002).
+
+    Only the ID of the one redeemable refresh token is kept, never a token. A
+    validly signed token of this family whose ID is not ``current_jti`` is an
+    older one coming back, which revokes the family.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="session_families")
+    organization = models.ForeignKey(
+        "organizations.Organization",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+        help_text="The user's organization (row-level security); empty for super admins.",
+    )
+    current_jti = models.CharField(max_length=64, editable=False)
+    generation = models.PositiveIntegerField(default=0, help_text="Rotations so far.")
+    created_at = models.DateTimeField(default=timezone.now, editable=False)
+    last_refreshed_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(help_text="Absolute end of the session.")
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    revoked_reason = models.CharField(max_length=32, choices=SessionEndReason.choices, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=512, blank=True)
+
+    objects = RefreshTokenFamilyQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = "session"
+        verbose_name_plural = "sessions"
+        ordering = ("-created_at",)
+        indexes = (models.Index(fields=("user", "revoked_at")),)
+        constraints = (
+            models.CheckConstraint(
+                condition=Q(revoked_at__isnull=True, revoked_reason="")
+                | Q(revoked_at__isnull=False) & ~Q(revoked_reason=""),
+                name="session_revocation_has_a_reason",
+            ),
+        )
+
+    def __str__(self) -> str:
+        return f"session {self.pk} of {self.user_id}"
+
+    @property
+    def tenant_id(self) -> uuid.UUID | None:
+        return self.organization_id
+
+    @property
+    def is_live(self) -> bool:
+        return self.revoked_at is None and self.expires_at > timezone.now()

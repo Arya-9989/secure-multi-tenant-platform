@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -14,7 +15,8 @@ from django.db import connection, connections, transaction
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from apps.accounts.authentication import TenantRefreshToken
+from apps.accounts import sessions
+from apps.accounts.authentication import FAMILY_CLAIM
 from apps.accounts.models import Invitation, User, hash_invitation_token
 from apps.accounts.roles import Role
 from apps.auditlogs.models import AuditAction, AuditLog
@@ -168,7 +170,8 @@ ClientFactory = Callable[[User], APIClient]
 
 
 def bearer(user: User) -> str:
-    return str(TenantRefreshToken.for_user(user).access_token)
+    """An access token of a fresh, real session (refresh-token family)."""
+    return str(sessions.start(user).access_token)
 
 
 @pytest.fixture
@@ -193,7 +196,10 @@ def forge_token(payload: dict[str, Any], key: str, algorithm: str = "HS256") -> 
 
 
 def token_claims(user: User, **overrides: Any) -> dict[str, Any]:
+    """Claims that would be accepted, so a test can break exactly one of them."""
     now = timezone.now()
+    saved = User.objects.filter(pk=user.pk).exists()
+    family = str(sessions.start(user)[FAMILY_CLAIM]) if saved else str(uuid.uuid4())
     return {
         "token_type": "access",
         "exp": int((now + timedelta(minutes=5)).timestamp()),
@@ -201,6 +207,7 @@ def token_claims(user: User, **overrides: Any) -> dict[str, Any]:
         "jti": "forged",
         "user_id": str(user.pk),
         "ver": user.token_version,
+        "fam": family,
         "aud": settings.SIMPLE_JWT["AUDIENCE"],
         "iss": settings.SIMPLE_JWT["ISSUER"],
         **overrides,

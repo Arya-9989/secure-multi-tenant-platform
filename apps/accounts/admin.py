@@ -1,9 +1,9 @@
-"""Inspection-only admin for accounts, invitations and JWT sessions.
+"""Inspection-only admin for accounts, invitations and sessions.
 
 People join through invitations and super admins through ``createsuperuser``,
-so nothing here edits a user. SimpleJWT's own token admins are replaced: they
-display stored refresh tokens verbatim (rotated ones are live credentials) and
-let an operator delete blacklist entries, which silently un-revokes a session.
+so nothing here edits a user. Sessions (refresh-token families, ADR 0002) are
+listed without the ID of their redeemable token, and cannot be edited or
+deleted: un-revoking a session would revive a session someone ended.
 """
 
 from typing import Any
@@ -11,9 +11,8 @@ from typing import Any
 from django.contrib import admin
 from django.contrib.auth.models import Group
 from django.http import HttpRequest
-from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 
-from apps.accounts.models import Invitation, User
+from apps.accounts.models import Invitation, RefreshTokenFamily, User
 
 
 class ViewOnlyAdmin[M: Any](admin.ModelAdmin[M]):
@@ -55,26 +54,38 @@ class InvitationAdmin(ViewOnlyAdmin[Invitation]):
     exclude = ("token_hash",)
 
 
-admin.site.unregister(OutstandingToken)
-admin.site.unregister(BlacklistedToken)
 # Django's groups and model permissions play no part here: authorization is the
 # role matrix in apps/accounts/roles.py. Hiding them avoids implying otherwise.
 admin.site.unregister(Group)
 
 
-@admin.register(OutstandingToken)
-class OutstandingTokenAdmin(ViewOnlyAdmin[OutstandingToken]):
-    list_display = ("jti", "user", "created_at", "expires_at")
-    list_select_related = ("user",)
-    search_fields = ("jti", "user__email")
-    fields = ("jti", "user", "created_at", "expires_at")  # never the token itself
+@admin.register(RefreshTokenFamily)
+class SessionAdmin(ViewOnlyAdmin[RefreshTokenFamily]):
+    list_display = (
+        "user",
+        "organization",
+        "created_at",
+        "last_refreshed_at",
+        "generation",
+        "expires_at",
+        "revoked_at",
+        "revoked_reason",
+    )
+    list_filter = ("revoked_reason", "organization")
+    list_select_related = ("user", "organization")
+    search_fields = ("user__email", "ip_address")
+    # Not the current token's ID: nobody needs it, so it is not shown.
+    fields = (
+        "id",
+        "user",
+        "organization",
+        "generation",
+        "created_at",
+        "last_refreshed_at",
+        "expires_at",
+        "revoked_at",
+        "revoked_reason",
+        "ip_address",
+        "user_agent",
+    )
     ordering = ("-created_at",)
-
-
-@admin.register(BlacklistedToken)
-class BlacklistedTokenAdmin(ViewOnlyAdmin[BlacklistedToken]):
-    list_display = ("token", "blacklisted_at")
-    list_select_related = ("token__user",)
-    search_fields = ("token__jti", "token__user__email")
-    fields = ("token", "blacklisted_at")
-    ordering = ("-blacklisted_at",)

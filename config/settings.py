@@ -43,7 +43,6 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     # third party
     "rest_framework",
-    "rest_framework_simplejwt.token_blacklist",
     "django_filters",
     "drf_spectacular",
     "drf_spectacular_sidecar",
@@ -178,8 +177,10 @@ REST_FRAMEWORK = {
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=env.int("JWT_ACCESS_TTL_MINUTES", default=5)),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=env.int("JWT_REFRESH_TTL_DAYS", default=1)),
+    # Rotation and reuse detection are ours (refresh-token families, ADR 0002);
+    # SimpleJWT only signs and verifies.
     "ROTATE_REFRESH_TOKENS": True,
-    "BLACKLIST_AFTER_ROTATION": True,
+    "BLACKLIST_AFTER_ROTATION": False,
     "UPDATE_LAST_LOGIN": True,
     "ALGORITHM": "HS256",
     "SIGNING_KEY": env.str("JWT_SIGNING_KEY", default=SECRET_KEY),
@@ -191,6 +192,8 @@ SIMPLE_JWT = {
     "USER_ID_CLAIM": "user_id",
     "USER_AUTHENTICATION_RULE": "apps.accounts.authentication.user_can_authenticate",
 }
+# Absolute lifetime of a session, however often its refresh token rotates.
+JWT_SESSION_MAX_AGE = timedelta(days=env.int("JWT_SESSION_MAX_AGE_DAYS", default=30))
 if not DEBUG and len(SIMPLE_JWT["SIGNING_KEY"]) < 32:
     raise ImproperlyConfigured("The JWT signing key must be at least 32 characters (RFC 7518).")
 

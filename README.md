@@ -15,8 +15,8 @@ forged tokens), and a structural test fails the build if someone adds a route wi
 covering it.
 
 It includes three roles, token-based expiring invitations, soft deactivation, hardened JWT
-sessions (rotation, blacklist, instant revocation) and an append-only audit log that
-PostgreSQL itself refuses to modify.
+sessions (refresh-token families with reuse detection, instant revocation) and an append-only
+audit log that PostgreSQL itself refuses to modify.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/swagger-cross-tenant-404-dark.png">
@@ -60,10 +60,14 @@ exactly what a nonexistent ID returns.</sub>
 - **Database-enforced invariants.** Check constraints guarantee that only super admins have
   no organization and only super admins are staff. Emails are lowercase. There is at most one
   open invitation per email per organization.
-- **JWT sessions that can be killed.** 5-minute access tokens, rotating refresh tokens with a
-  blacklist, logout, and logout-everywhere. Each request re-checks the user, the organization
-  and a per-user `token_version` against the database. A refresh token is claimed atomically,
-  so two requests racing with the same token can't both get a new session.
+- **JWT sessions that can be killed.** 5-minute access tokens and rotating refresh tokens,
+  grouped into one family per sign-in. Replaying a rotated refresh token is treated as theft:
+  the whole session is revoked, its access tokens stop working at once, and an
+  `auth.refresh_reuse_detected` event lands in the tenant's audit log. Rotation is a
+  compare-and-swap, so of any number of racing refreshes exactly one wins. No token is stored.
+  Each request re-checks the user, the organization, a per-user `token_version` and that its
+  session is still live, in the one query that loads the user
+  ([ADR 0002](docs/adr/0002-refresh-token-families.md)).
 - **Append-only audit log.** It records who, what, which tenant, IP, user agent and request
   ID, written in the same transaction as the change. The model, its QuerySet and a
   PostgreSQL trigger all reject updates and deletes.
@@ -261,7 +265,7 @@ sequenceDiagram
     MW->>MW: bind request_id, client IP
     MW->>JWT: authenticate
     JWT->>DB: load user + organization
-    alt bad signature / expired / blacklisted / stale token_version / inactive
+    alt bad signature / expired / session ended / stale token_version / inactive
         JWT-->>A: 401
     end
     JWT->>RBAC: role ORG_ADMIN needs user:manage
@@ -275,7 +279,7 @@ sequenceDiagram
     QS->>S: deactivate_user(actor, target)
     S->>DB: BEGIN, lock org row, then user row
     S->>S: re-check permission + tenant, not self, not last admin
-    S->>DB: update user, bump token_version, blacklist refresh tokens
+    S->>DB: update user, bump token_version, end sessions
     S->>DB: INSERT audit_log (actor, tenant, IP, request_id)
     S->>DB: COMMIT
     S-->>A: 200 + X-Request-ID
@@ -353,14 +357,14 @@ is in [ADR 0001](docs/adr/0001-postgres-row-level-security.md).
 | Orphaning a tenant (removing its last admin) | Invariant checked under row locks (org → user lock order) | `test_last_active_org_admin_cannot_be_removed` |
 | Forged or tampered JWTs, `alg=none` or another algorithm, wrong `aud`/`iss`, refresh used as access | SimpleJWT verification pinned to HS256, with audience and issuer, ≥32-char key enforced at startup | `test_forged_or_invalid_tokens_are_rejected` (9 variants) |
 | Trusting role or tenant claims in a token | Authorization reads role and tenant from the DB on every request | `test_role_claims_in_token_are_ignored` |
-| Refresh-token replay, stolen sessions | Rotation plus blacklist, claimed atomically so racing requests can't both redeem one token. Logout, logout-all, `token_version` bump on password change or deactivation | `test_auth.py` (rotation, logout, logout-all, password change), `test_a_refresh_token_is_redeemed_once_even_when_requests_race` |
+| Refresh-token replay, stolen sessions | Refresh-token families: a rotated token that comes back revokes the whole session, both copies, and is audited. Rotation is a compare-and-swap, so racing requests can't fork a session. Access tokens die with their session. Logout, logout-all, `token_version` bump on password change or deactivation | `test_sessions.py` (`test_replaying_a_rotated_token_revokes_the_whole_session`, `test_concurrent_refreshes_with_one_token_have_exactly_one_winner` with 8 threads), `test_auth.py` |
 | Deactivated user or org keeps working until token expiry | User and org `is_active` checked on every request and refresh. Deactivating an org revokes its members' tokens, so reactivating it doesn't revive old sessions | `test_deactivation_takes_effect_on_the_next_request`, `test_deactivating_an_organization_cuts_off_live_sessions`, `test_reactivating_an_organization_does_not_revive_old_sessions` |
 | Credential brute force | 10/min per-client throttle on API login, admin sign-in, refresh, password change and invitation accept, plus audited failures | `test_login_is_throttled`, `test_admin_login_is_throttled_like_the_api` |
 | Dodging the rate limit with a forged `X-Forwarded-For` | Throttles key on the audited client IP (`get_client_ip`), which ignores the header unless `NUM_PROXIES` > 0 and then takes the address the outermost trusted proxy appended | `test_login_throttle_ignores_a_spoofed_forwarded_for`, `test_behind_a_trusted_proxy_the_throttle_keys_on_the_address_it_appended` |
 | Account enumeration | One generic login error. Invitation acceptance fails generically, including when another sign-up takes the address mid-request. Inviting an email registered in another tenant reveals nothing | `test_failed_logins_are_generic_and_audited`, `test_no_cross_tenant_email_enumeration`, `test_a_signup_race_for_the_same_email_fails_generically` |
 | Invitation tokens leaked from the DB | Only a SHA-256 digest is stored. Tokens are single-use and expire after 72h | `test_invitation_lifecycle`, `test_unusable_tokens_fail_generically` |
 | Audit tampering | Model, QuerySet (including `bulk_create` upserts) and admin are read-only. A PostgreSQL `BEFORE UPDATE OR DELETE` trigger blocks raw SQL. Actors with history cannot be hard-deleted (`PROTECT`) | `test_audit_log.py` (incl. `test_database_trigger_rejects_raw_sql_mutation`, `test_bulk_create_cannot_upsert_over_existing_entries`) |
-| The Django admin as a side door | Sign-in throttled and audited like the API. Logging out everywhere, deactivation and an admin password change end admin sessions and API tokens alike. Stored refresh tokens are never displayed and blacklist entries can't be deleted. Tenant changes go through the audited services, and tenants can't be deleted | `test_admin.py` |
+| The Django admin as a side door | Sign-in throttled and audited like the API. Logging out everywhere, deactivation and an admin password change end admin sessions and API tokens alike. Sessions are listed without any token or token ID, and can't be edited or deleted, so none can be revived. Tenant changes go through the audited services, and tenants can't be deleted | `test_admin.py` |
 | Spoofed client IP or log injection | `X-Forwarded-For` is trusted only with `NUM_PROXIES` > 0. Caller request IDs must match `[A-Za-z0-9._-]{8,64}` | `test_client_ip_trusts_only_configured_proxies`, `test_request_id_is_propagated_or_generated` |
 | Injected script or framing on the landing page, API docs, error pages and admin | A strict CSP on every response: scripts, styles and fonts from the app's own origin only, no `'unsafe-inline'`, `frame-ancestors 'none'`. The pages contain no inline code and make no third-party requests | `test_web.py::test_strict_content_security_policy_on_every_response`, `test_pages_need_no_inline_code_or_third_party_assets`, `test_redoc_runs_a_self_hosted_bundle_that_makes_no_third_party_requests`, `test_admin.py::test_every_admin_page_works_under_the_strict_csp` |
 | A new endpoint ships without isolation | Structural tests: every API route must be in the isolation suite, every router viewset must subclass `TenantScopedViewSet`, every action must declare a permission | `test_every_api_route_is_covered`, `test_every_routed_viewset_is_tenant_scoped_and_declares_permissions` |
@@ -374,8 +378,6 @@ is in [ADR 0001](docs/adr/0001-postgres-row-level-security.md).
   its generic error.
 - SQLite (local development without Docker) has no row-level security. CI and the compose
   stack use PostgreSQL.
-- After a *single-session* logout, that session's access token stays valid for up to 5
-  minutes. Use logout-all when that matters, since it revokes access tokens immediately.
 - Without `REDIS_URL`, throttle counters are kept per gunicorn worker, so the effective limit
   is multiplied by the worker count. The compose stack uses Redis.
 - The schema owner can still switch RLS off, `TRUNCATE` or drop the audit table. The API
@@ -443,12 +445,13 @@ curl -s -X PATCH $API/users/<carol-id>/ -H "$AUTH" -H 'Content-Type: application
 curl -s "$API/audit-logs/?action=user.role_changed&page_size=5" -H "$AUTH" \
   | jq '.results[] | {created_at, action, actor_email, metadata, ip_address, request_id}'
 
-# Rotate the refresh token (the old one is blacklisted), then log out everywhere
+# Rotate the refresh token (replaying the old one would end the session), then log out everywhere
 curl -s -X POST $API/auth/refresh/ -H 'Content-Type: application/json' -d "{\"refresh\":\"$REFRESH\"}"
 curl -s -X POST $API/auth/logout-all/ -H "$AUTH" -o /dev/null -w '%{http_code}\n'   # 204
 ```
 
-Audit events: `auth.login_succeeded`, `auth.login_failed`, `auth.logout`, `auth.logout_all`,
+Audit events: `auth.login_succeeded`, `auth.login_failed`, `auth.refresh_reuse_detected`,
+`auth.logout`, `auth.logout_all`,
 `auth.password_changed`, `organization.created`, `organization.updated`,
 `user.profile_updated`, `user.role_changed`, `user.deactivated`, `user.reactivated`,
 `invitation.created`, `invitation.revoked`, `invitation.accepted`.
@@ -472,6 +475,7 @@ of them explicitly.
 | `REDIS_URL` | *(unset → in-process cache)* | Shared cache for throttling across workers |
 | `JWT_SIGNING_KEY` | `DJANGO_SECRET_KEY` | HS256 key, ≥ 32 characters (enforced) |
 | `JWT_ACCESS_TTL_MINUTES` / `JWT_REFRESH_TTL_DAYS` | `5` / `1` | Token lifetimes |
+| `JWT_SESSION_MAX_AGE_DAYS` | `30` | Absolute lifetime of a session (refresh-token family), however often it rotates. `manage.py prune_sessions --days N` deletes sessions that ended more than N days ago |
 | `JWT_AUDIENCE` / `JWT_ISSUER` | `secure-multi-tenant-platform` | `aud` / `iss` claims (verified) |
 | `PASSWORD_MIN_LENGTH` | `12` | Plus Django's similarity, common-password and numeric validators |
 | `INVITATION_TTL_HOURS` | `72` | Invitation expiry |
@@ -518,7 +522,8 @@ PostgreSQL in CI.
 | `test_row_level_security.py` | PostgreSQL row-level security: raw SQL reads and writes past the ORM, no scope and a fresh connection see nothing, the application's checks switched off, the owner bound by `FORCE`, the runtime role's privileges, savepoint bookkeeping, connection-time role checks, reversible migrations |
 | `test_permissions_matrix.py` | The roles table above, executed for every role, and anonymous access |
 | `test_privilege_escalation.py` | Mass assignment, self-promotion, super-admin protection, last-admin invariant, forged tokens |
-| `test_auth.py` | Login auditing, rotation and blacklist (including racing refreshes), logout(-all), deactivation and reactivation, throttling that a forged `X-Forwarded-For` can't dodge, password change |
+| `test_auth.py` | Login auditing, rotation, logout(-all), deactivation and reactivation, throttling that a forged `X-Forwarded-For` can't dodge, password change |
+| `test_sessions.py` | Refresh-token families: a replayed token revokes the session and is audited once, identical errors, forged session claims, absolute expiry, reasons on every revocation, `prune_sessions`, 8 concurrent refreshes with one winner |
 | `test_invitations.py` | Lifecycle, expiry, revocation, single use, weak passwords, sign-up races, enumeration resistance |
 | `test_audit_log.py` | Immutability (ORM, bulk upserts and PostgreSQL trigger), context capture, filters, cursor pagination |
 | `test_admin.py` | The Django admin: throttled and audited sign-in, sessions that end with logout-all and password changes, stored tokens never shown, no un-revoking, audited tenant changes, every page under the strict CSP, fonts that swap in without moving the layout |
@@ -586,11 +591,16 @@ its context-free default is no scope, not the last tenant.
 makes foreign rows invisible, so they 404 like random IDs. A 403 is reserved for "your role
 cannot do this at all", which leaks nothing about other tenants.
 
-**Token version plus blacklist instead of stateful sessions.** JWTs stay stateless for
+**Token version plus session families instead of a token blacklist.** JWTs stay stateless for
 signature and expiry checks, but each request loads the user row anyway (it must, so that
-role and tenant come from the DB and never from claims). Comparing one integer there makes
-logout-all, password change and deactivation take effect immediately, at the cost of one
-indexed lookup per request.
+role and tenant come from the DB and never from claims). Comparing one integer there, and
+checking with an `EXISTS` in the same query that the token's session is live, makes
+logout, logout-all, password change, deactivation and a detected replay take effect
+immediately, at the cost of one indexed lookup per request. A session row stores only the ID
+of its one redeemable refresh token, so a database read reveals no credential. Two tabs
+refreshing with the same token at the same moment end the session: clients must serialise
+refreshes, the price of not giving a thief a grace window
+([ADR 0002](docs/adr/0002-refresh-token-families.md)).
 
 **Domain audit events instead of logging every HTTP request.** Every request already produces a
 structured access-log line on stdout. The audit table stores *meaning* (`user.role_changed`
@@ -626,8 +636,6 @@ the prototype are not upgradable in place.
 
 None of these are implemented yet.
 
-- Refresh-token families with reuse detection, revoking the whole family when a rotated
-  token is replayed.
 - Per-account login throttling with progressive delays, alongside the per-IP limit.
 - MFA (TOTP/WebAuthn) and SSO via OIDC/SAML for organization admins.
 - Audit log streaming to a SIEM, time-based partitioning and retention, and hash-chaining

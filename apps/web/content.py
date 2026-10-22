@@ -51,13 +51,18 @@ TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
     ),
     SuiteFile(
         "test_auth.py",
-        22,
-        "Rotation races, spoof-proof throttling, logout everywhere, deactivation",
+        21,
+        "Login auditing, spoof-proof throttling, logout everywhere, deactivation",
     ),
     SuiteFile(
         "test_users_and_organizations.py",
         21,
         "Role changes, soft deactivation, database check constraints",
+    ),
+    SuiteFile(
+        "test_sessions.py",
+        21,
+        "Refresh-token families: a replayed token ends the session, races have one winner",
     ),
     SuiteFile(
         "test_invitations.py",
