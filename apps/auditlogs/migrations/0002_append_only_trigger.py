@@ -1,9 +1,10 @@
 """Make the audit table append-only at the database level (PostgreSQL).
 
 Application-level guards can be bypassed by raw SQL, a buggy migration or a
-compromised code path. This trigger rejects UPDATE and DELETE on every row
-for any role that does not own the trigger. On other databases (SQLite in
-local development) it is a no-op.
+compromised code path. This trigger rejects UPDATE and DELETE on every row,
+whichever role runs them; only a role allowed to drop the trigger (the table
+owner) can get around it. On other databases (SQLite in local development)
+it is a no-op.
 """
 
 from django.db import migrations
