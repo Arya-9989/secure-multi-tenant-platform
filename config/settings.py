@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     "apps.auditlogs",
     "apps.mfa",
     "apps.sso",
+    "apps.apikeys",
     "apps.web",
     # django.contrib.admin, hardened (apps.common.admin_site). Listed after
     # apps.web so that app's admin/base_site.html (theme, icon) takes precedence.
@@ -179,7 +180,11 @@ EMAIL_BACKEND: str = env.str(
 NUM_PROXIES: int = env.int("NUM_PROXIES", default=0)
 
 REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": ("apps.accounts.authentication.TenantJWTAuthentication",),
+    "DEFAULT_AUTHENTICATION_CLASSES": (
+        "apps.accounts.authentication.TenantJWTAuthentication",
+        # Services: scoped, read-only, tenant-bound keys (ADR 0005).
+        "apps.apikeys.authentication.ApiKeyAuthentication",
+    ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_FILTER_BACKENDS": (
         "django_filters.rest_framework.DjangoFilterBackend",
@@ -268,6 +273,7 @@ SPECTACULAR_SETTINGS = {
         {"name": "audit-logs", "description": "Append-only, tenant-scoped security audit trail."},
         {"name": "mfa", "description": "Your second factors: authenticator app, security keys."},
         {"name": "sso", "description": "Single sign-on through your organization's OIDC IdP."},
+        {"name": "api-keys", "description": "Scoped, read-only, expiring keys for services."},
         {"name": "health", "description": "Liveness and readiness probes."},
     ],
 }

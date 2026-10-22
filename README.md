@@ -92,6 +92,12 @@ exactly what a nonexistent ID returns.</sub>
   expiry. One tenant's IdP can never sign in another tenant's user, and tokens never appear
   in a URL. An end-to-end test signs in through a real Keycloak in CI
   ([ADR 0004](docs/adr/0004-mfa-and-oidc-sso.md)).
+- **API keys for services, scoped per endpoint.** Org admins issue keys at
+  `/api/v1/api-keys/`: tenant-bound, read-only (`users:read`, `audit:read`, ...), expiring,
+  rotatable with an overlap window and revocable on their own. Only a hash of the secret is
+  stored and the key is shown once. Every view declares which scope each action needs, and
+  an action that declares none refuses keys. A key sees exactly its tenant, through the same
+  scoping and row-level security as a person ([ADR 0005](docs/adr/0005-scoped-api-keys.md)).
 - **Per-account sign-in delays that can't lock you out.** On top of the per-IP limit, each
   account gets 5 free attempts and then a delay that doubles from 2 seconds to a 15-minute
   cap; attempts during a delay are refused before the password is checked. A browser that
@@ -380,6 +386,7 @@ is in [ADR 0001](docs/adr/0001-postgres-row-level-security.md).
 | A phished or reused password | MFA: TOTP or WebAuthn after the password, recovery codes for a lost device, an audited admin reset that also ends sessions; the Django admin asks for the code too | `test_a_password_alone_no_longer_signs_in`, `test_the_admin_asks_for_the_second_factor` |
 | Replaying a one-time code or a security-key answer | Each TOTP time step is accepted once by a compare-and-swap (also between racing requests); recovery codes are consumed by a conditional update; WebAuthn challenges are single-use and signature counters must advance | `test_a_totp_code_works_once`, `test_one_code_raced_from_two_challenges_signs_in_once`, `test_a_replayed_assertion_is_refused` |
 | Forged or substituted ID tokens, IdP mix-up, authorization-code theft | PKCE (S256), single-use state and nonce, JWKS signature with an asymmetric-only allow-list, exact `iss` (and discovery issuer), `aud`/`azp`, expiry; HTTPS-only IdP endpoints | `test_sso.py::test_invalid_id_tokens_are_refused` (14 variants), `test_a_discovery_document_for_another_issuer_is_refused`, `test_state_is_single_use` |
+| A service credential that sees too much or lives forever | API keys: one tenant, read scopes declared per endpoint (undeclared refuses keys), no writes at all, expiry, rotation with grace, revocation, hashed at rest, every lifecycle step audited | `test_api_keys.py` (`test_scopes_are_enforced_per_endpoint_and_keys_never_write`, `test_a_key_reads_its_own_tenant_only`, `test_api_keys_are_only_ever_granted_read_actions`) |
 | One tenant's IdP signing into another tenant | An IdP vouches only for existing, active members of its own organization, by linked subject or verified email; no just-in-time accounts, no super admins | `test_one_organizations_idp_cannot_sign_in_another_organizations_user`, e2e `Grace (Globex) cannot sign in through Acme's IdP` |
 | Credential brute force | 10/min per-client throttle on API login, admin sign-in, refresh, password change and invitation accept, plus audited failures | `test_login_is_throttled`, `test_admin_login_is_throttled_like_the_api` |
 | Distributed guessing against one account (a fresh IP per request) | Per-account buckets: 5 free attempts, then delays doubling to 15 minutes, refused attempts never evaluated; race-safe under bursts | `test_login_throttling.py` (`test_a_distributed_attack_meets_doubling_delays`, `test_a_burst_gets_exactly_the_attempts_the_policy_allows`, Redis variant in CI) |
@@ -428,6 +435,7 @@ admins.
 | Manage invitations | `GET/POST /invitations/`, `POST /invitations/{id}/revoke/` | any org | own org | no |
 | Query audit log | `GET /audit-logs/`, `GET /audit-logs/{id}/` | all + platform events | own org | no |
 | Reset a member's second factors | `POST /users/{id}/reset-mfa/` | yes | own org | no |
+| Issue, rotate and revoke API keys | `GET/POST /api-keys/`, `POST /api-keys/{id}/rotate/`, `.../revoke/` | any org | own org | no |
 | Configure single sign-on | `GET/POST /sso-providers/`, `GET/PATCH/DELETE /sso-providers/{id}/` | any org | own org | no |
 | Own profile, sessions and second factors | `/auth/me/`, `/auth/password/change/`, `/auth/logout*/`, `/auth/mfa/*` | yes | yes | yes |
 
@@ -451,6 +459,7 @@ under `/api/`, including unknown routes, are JSON.
 | Invitations | `GET/POST invitations/` (`?status=pending\|accepted\|revoked\|expired`) · `GET invitations/{id}/` · `POST invitations/{id}/revoke/` · `POST invitations/accept/` (public) |
 | Audit log | `GET audit-logs/` (`?action=`, `?actor=`, `?target_id=`, `?request_id=`, `?created_after=`, `?created_before=`, cursor-paginated) · `GET audit-logs/{id}/` |
 | Second factors | `GET auth/mfa/` · `POST auth/mfa/totp/` · `POST auth/mfa/totp/confirm/` · `POST auth/mfa/totp/disable/` · `POST auth/mfa/recovery-codes/` · `POST auth/mfa/webauthn/register/` · `POST auth/mfa/webauthn/register/complete/` · `POST auth/mfa/webauthn/{id}/remove/` · sign-in: `POST auth/mfa/verify/` · `POST auth/mfa/webauthn/begin/` · `POST auth/mfa/webauthn/complete/` |
+| API keys | `GET/POST api-keys/` · `GET api-keys/{id}/` · `POST api-keys/{id}/rotate/` (`grace_minutes`) · `POST api-keys/{id}/revoke/`. Services call the read endpoints with `Authorization: ApiKey mtk_<prefix>_<secret>` |
 | Single sign-on | `GET/POST sso-providers/` · `GET/PATCH/DELETE sso-providers/{id}/` · `GET auth/sso/{organization-slug}/login/` · `GET auth/sso/callback/` · `POST auth/sso/exchange/` |
 | Health | `GET /health/live/` · `GET /health/ready/` (database + cache, `503` when degraded) |
 
@@ -486,7 +495,8 @@ Audit events: `auth.login_succeeded`, `auth.login_failed`, `auth.refresh_reuse_d
 `auth.mfa_failed`, `auth.sso_failed`, `auth.logout`, `auth.logout_all`,
 `auth.password_changed`, `organization.created`, `organization.updated`, `mfa.totp_enabled`,
 `mfa.totp_disabled`, `mfa.webauthn_added`, `mfa.webauthn_removed`,
-`mfa.recovery_codes_generated`, `mfa.reset`, `sso.provider_created`, `sso.provider_updated`,
+`mfa.recovery_codes_generated`, `mfa.reset`, `api_key.created`, `api_key.rotated`,
+`api_key.revoked`, `sso.provider_created`, `sso.provider_updated`,
 `sso.provider_deleted`, `user.profile_updated`, `user.role_changed`, `user.deactivated`,
 `user.reactivated`, `invitation.created`, `invitation.revoked`, `invitation.accepted`.
 
@@ -575,6 +585,7 @@ PostgreSQL in CI.
 | `test_privilege_escalation.py` | Mass assignment, self-promotion, super-admin protection, last-admin invariant, forged tokens |
 | `test_auth.py` | Login auditing, rotation, logout(-all), deactivation and reactivation, throttling that a forged `X-Forwarded-For` can't dodge, password change |
 | `test_login_throttling.py` | Per-account delays against a distributed attacker, device tokens (the victim gets in, a stolen one buys little, forged and expired ones count as strangers), identical behaviour for unknown emails, bursts of 20 threads, the admin, the operator command, Redis |
+| `test_api_keys.py` | Keys shown once and stored hashed, input validation, tenant-bound reads (404 for foreign IDs), scopes per endpoint and no writes, seven malformed or wrong keys answering identically, revoked, expired and deactivated-tenant keys, last-use tracking at most once a minute, a throttle identity per key, rotation with and without grace, row-level security with the application's scoping off |
 | `test_mfa.py` | TOTP against the RFC 4226 and 6238 test vectors, enrolment, replay within the time step (also by racing requests), stale codes, recovery codes used once, five attempts per challenge, the account throttle, WebAuthn registration and sign-in through `py_webauthn` with a software authenticator (wrong origin, RP ID, presence, counter, replayed assertion, someone else's key), foreign key IDs answering 404, admin reset, the Django admin's code field, key rotation |
 | `test_sso.py` | OIDC against an in-process IdP that checks PKCE and client credentials: 14 forged or broken ID tokens, discovery mix-up, insecure endpoints, state and code replay, key rotation, no IdP crossing tenants or minting super admins, no just-in-time accounts, subject takeover, provider management with an encrypted, never-returned secret, the HTTP client's timeouts and errors |
 | `test_sessions.py` | Refresh-token families: a replayed token revokes the session and is audited once, identical errors, forged session claims, absolute expiry, reasons on every revocation, `prune_sessions`, 8 concurrent refreshes with one winner |
@@ -622,6 +633,7 @@ docker compose --profile sso run --rm sso-e2e
 │   │   └── views/
 │   ├── auditlogs/       # AuditLog model, record() service, read-only API,
 │   │   └── migrations/  # 0002_append_only_trigger.py
+│   ├── apikeys/         # ApiKey model, services (issue, rotate, revoke, authenticate), auth class
 │   ├── mfa/             # totp.py (RFC 6238), services.py (TOTP, WebAuthn, recovery codes), views
 │   └── sso/             # oidc.py (PKCE, ID-token validation), provider model, services, views
 ├── e2e/                 # sso_keycloak.py: SSO through a real Keycloak (compose profile sso)
@@ -710,7 +722,6 @@ None of these are implemented yet.
 - Audit log streaming to a SIEM, time-based partitioning and retention, and hash-chaining
   for tamper evidence beyond the database.
 - Asynchronous email delivery (task queue plus provider) with delivery status on invitations.
-- Scoped API keys for service-to-service access.
 - OpenTelemetry tracing correlated with the existing request IDs.
 
 ## License

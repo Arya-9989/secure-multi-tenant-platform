@@ -21,12 +21,12 @@ class SuiteFile(NamedTuple):
 TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
     SuiteFile(
         "test_permissions_matrix.py",
-        77,
+        89,
         "The role table, executed for every role and for anonymous callers",
     ),
     SuiteFile(
         "test_tenant_isolation.py",
-        62,
+        73,
         "Cross-tenant matrix, foreign-key references, existence oracle, route coverage",
     ),
     SuiteFile(
@@ -43,6 +43,11 @@ TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
         "test_mfa.py",
         45,
         "TOTP against the RFC vectors, WebAuthn end to end, every replay refused",
+    ),
+    SuiteFile(
+        "test_api_keys.py",
+        39,
+        "Keys for services: hashed, read-only, scoped per endpoint, one tenant only",
     ),
     SuiteFile(
         "test_web.py",

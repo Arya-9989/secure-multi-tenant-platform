@@ -24,6 +24,7 @@ from rest_framework.test import APIRequestFactory
 
 from apps.accounts.models import Invitation, User
 from apps.accounts.roles import Perm, role_has_permission
+from apps.apikeys.models import ApiKey
 from apps.auditlogs.models import AuditLog
 from apps.common.permissions import TenantObjectPermission
 from apps.common.views import TenantScopedViewSet
@@ -84,6 +85,16 @@ OBJECT_CASES = (
         {"enabled": False, "client_secret": "attacker-controlled"},
     ),
     ObjectCase("ssoprovider-delete", "delete", "ssoprovider-detail", "sso_b", Perm.SSO_MANAGE),
+    ObjectCase("apikey-retrieve", "get", "apikey-detail", "api_key_b", Perm.API_KEY_MANAGE),
+    ObjectCase("apikey-revoke", "post", "apikey-revoke", "api_key_b", Perm.API_KEY_MANAGE),
+    ObjectCase(
+        "apikey-rotate",
+        "post",
+        "apikey-rotate",
+        "api_key_b",
+        Perm.API_KEY_MANAGE,
+        {"grace_minutes": 60},
+    ),
 )
 
 
@@ -100,6 +111,7 @@ LIST_CASES = (
     ListCase("invitation-list", Perm.INVITATION_MANAGE, Invitation),
     ListCase("auditlog-list", Perm.AUDIT_VIEW, AuditLog),
     ListCase("ssoprovider-list", Perm.SSO_MANAGE, OidcProvider),
+    ListCase("apikey-list", Perm.API_KEY_MANAGE, ApiKey),
 )
 
 
@@ -144,7 +156,7 @@ def test_super_admin_is_not_tenant_restricted(
     response = getattr(client_for(world.super_admin), case.method)(
         url, case.body or {}, format="json"
     )
-    assert response.status_code in {200, 204}, response.content
+    assert response.status_code in {200, 201, 204}, response.content
 
 
 @pytest.mark.parametrize("actor_name", TENANT_A_ACTORS)

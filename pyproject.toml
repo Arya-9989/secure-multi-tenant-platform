@@ -78,7 +78,7 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 # drf-spectacular's extension base classes are untyped.
-module = ["apps.accounts.schema", "apps.common.schema"]
+module = ["apps.accounts.schema", "apps.apikeys.schema", "apps.common.schema"]
 disallow_untyped_calls = false
 
 [[tool.mypy.overrides]]

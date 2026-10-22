@@ -12,7 +12,7 @@ from rest_framework.views import APIView
 
 from apps.accounts import services
 from apps.accounts.models import Invitation, InvitationStatus
-from apps.accounts.roles import ASSIGNABLE_ROLE_CHOICES, Perm
+from apps.accounts.roles import ASSIGNABLE_ROLE_CHOICES, ApiScope, Perm
 from apps.accounts.serializers.invitations import (
     AcceptInvitationSerializer,
     InvitationCreatedSerializer,
@@ -65,6 +65,7 @@ class InvitationViewSet(
         "create": Perm.INVITATION_MANAGE,
         "revoke": Perm.INVITATION_MANAGE,
     }
+    api_key_scopes = {"list": ApiScope.INVITATIONS_READ, "retrieve": ApiScope.INVITATIONS_READ}
 
     @extend_schema(
         summary="Invite someone to an organization",

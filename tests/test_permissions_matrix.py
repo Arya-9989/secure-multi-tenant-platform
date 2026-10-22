@@ -118,6 +118,20 @@ MATRIX = (
         (200, 200, 403),
         lambda w: {"enabled": False},
     ),
+    Row("apikey-list", "get", lambda w: reverse("apikey-list"), (200, 200, 403)),
+    Row(
+        "apikey-create",
+        "post",
+        lambda w: reverse("apikey-list"),
+        (201, 201, 403),
+        lambda w: {"name": "BI", "scopes": ["users:read"], "organization": str(w.org_a.pk)},
+    ),
+    Row(
+        "apikey-revoke",
+        "post",
+        lambda w: reverse("apikey-revoke", args=[w.api_key_a.pk]),
+        (200, 200, 403),
+    ),
     Row("me", "get", lambda w: reverse("auth-me"), (200, 200, 200)),
 )
 

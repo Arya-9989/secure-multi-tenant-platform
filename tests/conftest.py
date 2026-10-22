@@ -19,6 +19,7 @@ from apps.accounts import sessions
 from apps.accounts.authentication import FAMILY_CLAIM
 from apps.accounts.models import Invitation, User, hash_invitation_token
 from apps.accounts.roles import Role
+from apps.apikeys.models import ApiKey, hash_secret
 from apps.auditlogs.models import AuditAction, AuditLog
 from apps.auditlogs.services import record
 from apps.common import crypto, rls
@@ -145,6 +146,7 @@ class World:
     invitation_a: Invitation
     audit_a: AuditLog
     sso_a: OidcProvider
+    api_key_a: ApiKey
     org_b: Organization
     admin_b: User
     member_b: User
@@ -152,6 +154,7 @@ class World:
     invitation_b: Invitation
     audit_b: AuditLog
     sso_b: OidcProvider
+    api_key_b: ApiKey
 
 
 @pytest.fixture
@@ -171,7 +174,16 @@ def world(db: None) -> World:
             client_id=f"platform-{key}",
             client_secret_encrypted=crypto.encrypt(f"secret-{key}"),
         )
-        tenants[key] = (org, admin, member, inactive, invitation, audit, sso)
+        api_key = ApiKey.objects.create(
+            organization=org,
+            name=f"SIEM export {key}",
+            prefix=f"{key}0000000000{key}",
+            secret_hash=hash_secret(f"secret-{key}"),
+            scopes=["audit:read"],
+            created_by=admin,
+            expires_at=timezone.now() + timedelta(days=30),
+        )
+        tenants[key] = (org, admin, member, inactive, invitation, audit, sso, api_key)
     return World(super_admin, *tenants["a"], *tenants["b"])
 
 

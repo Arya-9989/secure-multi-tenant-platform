@@ -14,6 +14,7 @@ from apps.accounts.views.auth import (
 )
 from apps.accounts.views.invitations import AcceptInvitationView, InvitationViewSet
 from apps.accounts.views.users import UserViewSet
+from apps.apikeys.views import ApiKeyViewSet
 from apps.auditlogs.views import AuditLogViewSet
 from apps.common.views import LivenessView, ReadinessView
 from apps.mfa import views as mfa
@@ -27,6 +28,7 @@ router.register("users", UserViewSet, basename="user")
 router.register("invitations", InvitationViewSet, basename="invitation")
 router.register("audit-logs", AuditLogViewSet, basename="auditlog")
 router.register("sso-providers", OidcProviderViewSet, basename="ssoprovider")
+router.register("api-keys", ApiKeyViewSet, basename="apikey")
 
 api_v1: list[URLPattern | URLResolver] = [
     path("auth/login/", LoginView.as_view(), name="auth-login"),

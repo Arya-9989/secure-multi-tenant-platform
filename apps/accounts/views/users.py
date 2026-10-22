@@ -9,7 +9,7 @@ from rest_framework.response import Response
 
 from apps.accounts import services
 from apps.accounts.models import User
-from apps.accounts.roles import Perm, Role
+from apps.accounts.roles import ApiScope, Perm, Role
 from apps.accounts.serializers.users import UserRoleUpdateSerializer, UserSerializer
 from apps.common.views import TenantScopedViewSet
 from apps.mfa import services as mfa
@@ -51,6 +51,7 @@ class UserViewSet(
         "reactivate": Perm.USER_MANAGE,
         "reset_mfa": Perm.USER_MANAGE,
     }
+    api_key_scopes = {"list": ApiScope.USERS_READ, "retrieve": ApiScope.USERS_READ}
 
     @extend_schema(
         summary="Change a user's role",
