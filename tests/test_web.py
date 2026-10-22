@@ -253,6 +253,21 @@ def test_landing_test_inventory_matches_the_suite(request: pytest.FixtureRequest
     assert dict(collected) == {entry.path: entry.tests for entry in TEST_SUITE}
 
 
+@pytest.mark.django_db
+def test_landing_is_compressed_for_clients_that_accept_it(api_client: APIClient) -> None:
+    response = api_client.get("/", HTTP_ACCEPT_ENCODING="gzip")
+
+    assert response["Content-Encoding"] == "gzip"
+    assert "Accept-Encoding" in response["Vary"]
+    html = gzip.decompress(response.content).decode()
+    assert html.startswith("<!doctype html>")
+    assert html.rstrip().endswith("</html>")
+    assert "Not forbidden. Absent." in html
+    # Nothing secret or request-reflected rides along for a compression oracle.
+    assert "csrfmiddlewaretoken" not in html
+    assert "csrftoken" not in response.cookies
+
+
 # ---------------------------------------------------------------- isolation story
 STORY_STEPS = (
     ("Request", "Alice asks for Grace."),

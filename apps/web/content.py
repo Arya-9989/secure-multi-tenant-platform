@@ -36,7 +36,7 @@ TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
     ),
     SuiteFile(
         "test_web.py",
-        34,
+        35,
         "This page, the API docs, error pages and the Content Security Policy",
     ),
     SuiteFile(

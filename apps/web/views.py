@@ -124,6 +124,10 @@ def suite_inventory() -> dict[str, Any]:
     }
 
 
+# Compressed: the page carries no secret or request-reflected input for a
+# compression oracle (BREACH) to recover, and gzip keeps the isolation story's
+# inline SVG from slowing the first paint.
+@method_decorator(gzip_page, name="dispatch")
 @method_decorator(cache_control(no_cache=True, max_age=0), name="dispatch")
 class LandingView(TemplateView):
     template_name = "web/landing.html"
