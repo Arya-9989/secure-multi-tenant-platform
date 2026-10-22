@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
+from typing import TYPE_CHECKING, ClassVar, TypeVar
 
 from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured
@@ -105,12 +105,17 @@ class ReadinessView(_ProbeView):
         tags=["health"], responses={200: _health_response, 503: _health_response}, auth=[]
     )
     def get(self, request: Request) -> Response:
-        checks: dict[str, Any] = {"database": _check_database(), "cache": _check_cache()}
+        checks = readiness_checks()
         healthy = all(result == "ok" for result in checks.values())
         return Response(
             {"status": "ok" if healthy else "unavailable", "checks": checks},
             status=status.HTTP_200_OK if healthy else status.HTTP_503_SERVICE_UNAVAILABLE,
         )
+
+
+def readiness_checks() -> dict[str, str]:
+    """Probe every dependency the app needs to serve traffic (``"ok"`` or ``"error"``)."""
+    return {"database": _check_database(), "cache": _check_cache()}
 
 
 def _check_database() -> str:
