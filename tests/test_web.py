@@ -12,18 +12,26 @@ from typing import Any, cast
 import pytest
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
-from django.test import Client, RequestFactory
+from django.test import Client, RequestFactory, override_settings
+from django.urls import reverse
 from rest_framework.test import APIClient
 
+from apps.accounts.authentication import TenantJWTAuthentication
+from apps.accounts.models import User
 from apps.accounts.roles import ROLE_PERMISSIONS, Perm
+from apps.accounts.views.users import UserViewSet
 from apps.auditlogs.models import AuditAction
 from apps.common.context import RequestContext, bind_request_context, reset_request_context
+from apps.common.permissions import HasRolePermission, TenantObjectPermission
+from apps.common.tenancy import TenantQuerySet
 from apps.web import errors
 from apps.web import views as web_views
 from apps.web.content import TEST_SUITE
 from apps.web.views import PERMISSION_LABELS, Quantity, humanize_duration, humanize_rate
+from tests.conftest import ClientFactory, World
 
 HTML_PAGES = ("/", "/api/docs/", "/api/redoc/")
+STATIC_DIR = Path(__file__).resolve().parent.parent / "apps" / "web" / "static" / "web"
 ERROR_PAGE = "/no-such-page/"
 
 
@@ -243,3 +251,130 @@ def test_landing_test_inventory_matches_the_suite(request: pytest.FixtureRequest
         pytest.skip("Only meaningful when the whole suite is collected.")
 
     assert dict(collected) == {entry.path: entry.tests for entry in TEST_SUITE}
+
+
+# ---------------------------------------------------------------- isolation story
+STORY_STEPS = (
+    ("Request", "Alice asks for Grace."),
+    ("Tenant resolve", "The tenant comes from the database."),
+    ("Scoped query", "Only Acme&rsquo;s rows exist."),
+    ("404", "Not forbidden. Absent."),
+)
+
+
+def _story(html: str) -> str:
+    start = html.index('<div class="story" data-story>')
+    return html[start : html.index("</ol>", start)]
+
+
+@pytest.mark.django_db
+def test_landing_tells_the_isolation_story_without_javascript(api_client: APIClient) -> None:
+    """Every step and the finished figure are server-rendered; motion only builds them up."""
+    story = _story(api_client.get("/").content.decode())
+
+    for kicker, title in STORY_STEPS:
+        assert f"</span>{kicker}</p>" in story
+        assert f'<h3 class="t-tile">{title}</h3>' in story
+    assert story.count('class="story-step"') == len(STORY_STEPS)
+    assert story.count('class="story-mark" aria-hidden="true"') == len(STORY_STEPS)
+    for label in (
+        "/api/v1/users/{grace&rsquo;s id}/",
+        "TenantJWTAuthentication",
+        "Acme Corp",
+        "Globex Inc",
+        "visible_to(alice)",
+        "WHERE organization_id = {acme&rsquo;s id}",
+        "AND id = {grace&rsquo;s id}",
+        "0 rows",
+        "404 Not Found",
+        "Same as a random ID",
+    ):
+        assert label in story, label
+    # Nothing in the story starts hidden: no hidden attribute, no inline style.
+    assert not re.search(r"\shidden\b|\sstyle=", story)
+
+
+@pytest.mark.django_db
+def test_the_story_shows_what_the_api_really_does(
+    api_client: APIClient, world: World, client_for: ClientFactory
+) -> None:
+    """The figure's 404 body, SQL and code names are the real ones, not illustrations."""
+    story = _story(api_client.get("/").content.decode())
+
+    foreign = client_for(world.admin_a).get(reverse("user-detail", args=[world.admin_b.pk]))
+    assert foreign.status_code == 404
+    assert f'{{"detail": "{foreign.json()["detail"]}"}}' in story
+
+    scoped = User.objects.visible_to(world.admin_a).filter(pk=world.admin_b.pk)
+    where = str(scoped.query).split(" WHERE ", 1)[1]
+    assert f'"accounts_user"."organization_id" = {world.org_a.pk.hex}' in where.replace("-", "")
+    assert '"accounts_user"."id" =' in where
+    assert not scoped.exists()
+
+    assert "get_user" in vars(TenantJWTAuthentication)
+    assert isinstance(User.objects.all(), TenantQuerySet)
+    assert "visible_to" in vars(TenantQuerySet)
+    for name in ("UserViewSet", "TenantJWTAuthentication.get_user", "TenantQuerySet.visible_to"):
+        assert f"<code>{name}</code>" in story
+    guards = {type(permission) for permission in UserViewSet().get_permissions()}
+    assert {HasRolePermission, TenantObjectPermission} <= guards
+    isolation_tests = (Path(__file__).parent / "test_tenant_isolation.py").read_text()
+    assert "def test_unknown_and_foreign_ids_are_indistinguishable(" in isolation_tests
+
+
+def _blocks(css: str, prelude: str) -> list[str]:
+    """The bodies of every top-level block whose prelude starts with ``prelude``."""
+    bodies, start = [], 0
+    while (at := css.find(prelude, start)) != -1:
+        depth, i = 0, css.index("{", at)
+        for j in range(i, len(css)):
+            depth += {"{": 1, "}": -1}.get(css[j], 0)
+            if depth == 0:
+                bodies.append(css[i + 1 : j])
+                break
+        start = j
+    return bodies
+
+
+def test_scroll_motion_only_exists_without_reduced_motion() -> None:
+    """With reduced motion, or without scroll timelines and the script, the story is static."""
+    css = (STATIC_DIR / "css" / "site.css").read_text()
+    motion = "".join(_blocks(css, "@media (prefers-reduced-motion: no-preference)"))
+    outside = css
+    for body in _blocks(css, "@media (prefers-reduced-motion: no-preference)"):
+        outside = outside.replace(body, "")
+
+    for token in ("animation-timeline", "view-timeline", "js-scrub", "sx-in", "sx-draw"):
+        assert token in motion, token
+    for token in ("animation-timeline", "view-timeline", "js-scrub", "animation:"):
+        assert token not in outside.split("@keyframes", 1)[0], token
+    # Native scroll timelines only apply where the browser has them.
+    native = "".join(_blocks(motion, "@supports (animation-timeline: view()) and (timeline-scope"))
+    assert native.count("animation-timeline: --s") == motion.count("animation-timeline: --s") > 0
+
+
+def test_story_script_only_hides_what_it_has_already_placed() -> None:
+    script = (STATIC_DIR / "js" / "story.js").read_text()
+
+    assert "prefers-reduced-motion: reduce" in script
+    # The fallback class is added only after the first progress values are set.
+    apply = script[script.index("const apply") :]
+    assert apply.index("update();") < apply.index('classList.add("js-scrub")')
+    # No eval-like constructs or HTML injection (strict CSP, no unsafe-eval).
+    assert not re.search(r"\beval\(|new Function|innerHTML|setAttribute\(\"style", script)
+
+
+@pytest.mark.django_db
+def test_story_script_is_served_same_origin_with_safe_headers(api_client: APIClient) -> None:
+    html = api_client.get("/").content.decode()
+    assert '<script src="/static/web/js/story.js" defer></script>' in html
+
+    with override_settings(WHITENOISE_USE_FINDERS=True, WHITENOISE_AUTOREFRESH=True):
+        response = Client().get("/static/web/js/story.js")
+
+    assert response.status_code == 200
+    assert response["Content-Type"].startswith("text/javascript")
+    assert response["X-Content-Type-Options"] == "nosniff"
+    assert "script-src 'self'" in response["Content-Security-Policy"]
+    body = b"".join(cast(Any, response).streaming_content).decode()
+    assert body == (STATIC_DIR / "js" / "story.js").read_text()
