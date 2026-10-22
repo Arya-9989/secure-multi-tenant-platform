@@ -185,6 +185,7 @@ body {
 :root body .swagger-ui .info .description .markdown p,
 :root body .swagger-ui .info .description .renderedMarkdown p { font-size: 17px; line-height: 1.47; letter-spacing: -0.022em; color: var(--ink-2); }
 :root body .swagger-ui .info .base-url { color: var(--ink-3); font-size: 12px; }
+:root body .swagger-ui .info a { color: var(--accent-ink); }
 :root body .swagger-ui .markdown code,
 :root body .swagger-ui .renderedMarkdown code {
   background: var(--bg-sunk);
@@ -206,7 +207,7 @@ body {
 }
 :root body .swagger-ui .scheme-container .schemes { align-items: center; }
 :root body .swagger-ui .filter-container { max-width: 1232px; margin: 0 auto 8px; padding: 0 16px; }
-:root body .swagger-ui .filter-container .filter { max-width: none; padding: 0; margin: 0; }
+:root body .swagger-ui .filter-container .filter { max-width: none; width: 100%; padding: 0; margin: 0; }
 :root body .swagger-ui .filter .operation-filter-input {
   margin: 0;
   min-height: 44px;
@@ -216,6 +217,8 @@ body {
   background: var(--bg-elev);
   color: var(--ink);
   font-size: 15px;
+  width: 100%;
+  max-width: none;
 }
 
 /* ----------------------------------------------------------------- swagger: buttons */
@@ -506,10 +509,15 @@ body {
 :root body .swagger-ui .errors-wrapper { border-radius: 12px; }
 
 @media (max-width: 640px) {
-  :root body .swagger-ui .opblock .opblock-summary { flex-wrap: wrap; }
+  /* Method in a fixed left column; long paths wrap beside it. */
+  :root body .swagger-ui .opblock .opblock-summary-control { align-items: flex-start; }
+  :root body .swagger-ui .opblock .opblock-summary-method { flex: none; }
+  :root body .swagger-ui .opblock .opblock-summary-path-description-wrapper { flex: 1 1 0; min-width: 0; flex-wrap: wrap; padding-top: 4px; }
+  :root body .swagger-ui .opblock .opblock-summary-path { max-width: 100%; overflow-wrap: anywhere; }
   :root body .swagger-ui .opblock .opblock-summary-description { flex-basis: 100%; padding: 4px 0 0; }
   :root body .swagger-ui .opblock-tag { font-size: 21px; flex-wrap: wrap; }
-  :root body .swagger-ui .opblock-tag small { flex-basis: 100%; padding: 4px 0 0; font-size: 14px; }
+  :root body .swagger-ui .opblock-tag .expand-operation { order: 2; margin-left: auto; }
+  :root body .swagger-ui .opblock-tag small { order: 3; flex-basis: 100%; padding: 4px 0 0; font-size: 14px; }
 }
 
 /* ----------------------------------------------------------------- redoc */
