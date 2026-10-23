@@ -78,3 +78,35 @@ def send_invitation_email(
         email_message_id=_message_id(invitation),
     )
     return "sent"
+
+
+@task
+def send_password_reset_email(sealed_email: str) -> str:
+    """Send a reset link if the address belongs to an account that may sign in."""
+    from apps.accounts.authentication import user_can_authenticate  # noqa: PLC0415
+    from apps.accounts.models import User  # noqa: PLC0415
+    from apps.accounts.password_reset import reset_link  # noqa: PLC0415
+    from apps.auditlogs.models import AuditAction  # noqa: PLC0415
+    from apps.auditlogs.services import record  # noqa: PLC0415
+
+    email = crypto.decrypt(sealed_email)
+    user = User.objects.select_related("organization").filter(email=email).first()
+    if user is None or not user_can_authenticate(user):
+        return "no-account"  # nothing is sent, and nobody was told otherwise
+    EmailMessage(
+        subject="Reset your password",
+        body=(
+            "Someone asked to reset the password of your account. If it was you, choose a "
+            f"new one here:\n\n{reset_link(user)}\n\n"
+            f"The link works once and expires in {settings.PASSWORD_RESET_TIMEOUT // 60} "
+            "minutes. If it was not you, ignore this email: your password is unchanged."
+        ),
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        to=[user.email],
+    ).send(fail_silently=False)
+    record(
+        AuditAction.PASSWORD_RESET_REQUESTED,
+        organization=user.organization,
+        target=user,
+    )
+    return "sent"

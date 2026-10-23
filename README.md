@@ -118,6 +118,11 @@ exactly what a nonexistent ID returns.</sub>
   the same trace. Unset, nothing is installed. No email, IP, user agent, token or query
   string is put on a span, and a test proves it. Jaeger runs in compose
   (`--profile tracing`) ([ADR 0008](docs/adr/0008-opentelemetry-tracing.md)).
+- **Account recovery and session control.** A forgotten password is reset by an emailed,
+  single-use, expiring link; the request answers identically whether or not the address has
+  an account, because a background task does the lookup. Users list where they are signed in
+  and end any session; org admins can sign a member out everywhere without deactivating
+  them.
 - **Per-account sign-in delays that can't lock you out.** On top of the per-IP limit, each
   account gets 5 free attempts and then a delay that doubles from 2 seconds to a 15-minute
   cap; attempts during a delay are refused before the password is checked. A browser that
@@ -426,7 +431,7 @@ is in [ADR 0001](docs/adr/0001-postgres-row-level-security.md).
 | Distributed guessing against one account (a fresh IP per request) | Per-account buckets: 5 free attempts, then delays doubling to 15 minutes, refused attempts never evaluated; race-safe under bursts | `test_login_throttling.py` (`test_a_distributed_attack_meets_doubling_delays`, `test_a_burst_gets_exactly_the_attempts_the_policy_allows`, Redis variant in CI) |
 | Locking a victim out by failing on their behalf | No hard lockout; devices that signed in before carry a signed device token and are counted separately; a stolen device token buys only that device's budget; operators can clear a bucket | `test_the_victim_still_gets_into_their_own_device`, `test_a_stolen_device_token_buys_only_that_devices_budget`, `test_operators_can_clear_an_accounts_delay` |
 | Dodging the rate limit with a forged `X-Forwarded-For` | Throttles key on the audited client IP (`get_client_ip`), which ignores the header unless `NUM_PROXIES` > 0 and then takes the address the outermost trusted proxy appended | `test_login_throttle_ignores_a_spoofed_forwarded_for`, `test_behind_a_trusted_proxy_the_throttle_keys_on_the_address_it_appended` |
-| Account enumeration | One generic login error, and unknown emails are delayed exactly like real ones. Invitation acceptance fails generically, including when another sign-up takes the address mid-request. Inviting an email registered in another tenant reveals nothing | `test_failed_logins_are_generic_and_audited`, `test_unknown_emails_are_throttled_exactly_like_real_ones`, `test_no_cross_tenant_email_enumeration`, `test_a_signup_race_for_the_same_email_fails_generically` |
+| Account enumeration | One generic login error, and unknown emails are delayed exactly like real ones. Password reset requests always answer 202 the same way; the account lookup runs in a background task. Invitation acceptance fails generically, including when another sign-up takes the address mid-request. Inviting an email registered in another tenant reveals nothing | `test_failed_logins_are_generic_and_audited`, `test_unknown_emails_are_throttled_exactly_like_real_ones`, `test_no_cross_tenant_email_enumeration`, `test_a_signup_race_for_the_same_email_fails_generically` |
 | Invitation tokens leaked from the DB | Only a SHA-256 digest is stored. Tokens are single-use and expire after 72h | `test_invitation_lifecycle`, `test_unusable_tokens_fail_generically` |
 | Audit tampering | Model, QuerySet (no bulk inserts or upserts) and admin are read-only. A PostgreSQL `BEFORE UPDATE OR DELETE` trigger blocks raw SQL, the runtime role has only `SELECT, INSERT`, and partitions are reachable only through the parent. Actors with history cannot be hard-deleted (`PROTECT`) | `test_audit_log.py` (incl. `test_database_trigger_rejects_raw_sql_mutation`, `test_bulk_create_cannot_upsert_over_existing_entries`), `test_the_runtime_role_cannot_read_partitions_directly` |
 | Audit history rewritten by someone with database access (the owner, a restored backup) | Per-tenant HMAC hash chains with the key outside the database; `verify_audit_chain`; retention checkpoints; the SIEM's copy and per-chain cursors anchor the chain outside the database and expose a truncated tail | `test_audit_chain.py` (modified, deleted, reordered, forged rows; recomputed with a guessed key; truncated tail; 10 concurrent writers; retention) |
@@ -469,7 +474,7 @@ admins.
 | Deactivate / reactivate users | `POST /users/{id}/deactivate/`, `.../reactivate/` | yes | own org | no |
 | Manage invitations | `GET/POST /invitations/`, `POST /invitations/{id}/revoke/` | any org | own org | no |
 | Query audit log | `GET /audit-logs/`, `GET /audit-logs/{id}/` | all + platform events | own org | no |
-| Reset a member's second factors | `POST /users/{id}/reset-mfa/` | yes | own org | no |
+| Reset a member's second factors, sign a member out everywhere | `POST /users/{id}/reset-mfa/`, `POST /users/{id}/revoke-sessions/` | yes | own org | no |
 | Issue, rotate and revoke API keys | `GET/POST /api-keys/`, `POST /api-keys/{id}/rotate/`, `.../revoke/` | any org | own org | no |
 | Configure single sign-on | `GET/POST /sso-providers/`, `GET/PATCH/DELETE /sso-providers/{id}/` | any org | own org | no |
 | Own profile, sessions and second factors | `/auth/me/`, `/auth/password/change/`, `/auth/logout*/`, `/auth/mfa/*` | yes | yes | yes |
@@ -488,9 +493,9 @@ under `/api/`, including unknown routes, are JSON.
 
 | Area | Endpoints |
 |---|---|
-| Auth | `POST auth/login/` · `POST auth/refresh/` · `POST auth/logout/` · `POST auth/logout-all/` · `GET/PATCH auth/me/` · `POST auth/password/change/` |
+| Auth | `POST auth/login/` · `POST auth/refresh/` · `POST auth/logout/` · `POST auth/logout-all/` · `GET/PATCH auth/me/` · `POST auth/password/change/` · `POST auth/password/reset/` · `POST auth/password/reset/confirm/` · `GET auth/sessions/` · `POST auth/sessions/{id}/revoke/` |
 | Organizations | `GET/POST organizations/` · `GET/PATCH organizations/{id}/` |
-| Users | `GET users/` (`?role=`, `?is_active=`, `?search=`) · `GET/PATCH users/{id}/` · `POST users/{id}/deactivate/` · `POST users/{id}/reactivate/` |
+| Users | `GET users/` (`?role=`, `?is_active=`, `?search=`) · `GET/PATCH users/{id}/` · `POST users/{id}/deactivate/` · `POST users/{id}/reactivate/` · `POST users/{id}/reset-mfa/` · `POST users/{id}/revoke-sessions/` |
 | Invitations | `GET/POST invitations/` (`?status=pending\|accepted\|revoked\|expired`) · `GET invitations/{id}/` · `POST invitations/{id}/resend/` (new link, new email) · `POST invitations/{id}/revoke/` · `POST invitations/accept/` (public) |
 | Audit log | `GET audit-logs/` (`?action=`, `?actor=`, `?target_id=`, `?request_id=`, `?created_after=`, `?created_before=`, cursor-paginated) · `GET audit-logs/{id}/` |
 | Second factors | `GET auth/mfa/` · `POST auth/mfa/totp/` · `POST auth/mfa/totp/confirm/` · `POST auth/mfa/totp/disable/` · `POST auth/mfa/recovery-codes/` · `POST auth/mfa/webauthn/register/` · `POST auth/mfa/webauthn/register/complete/` · `POST auth/mfa/webauthn/{id}/remove/` · sign-in: `POST auth/mfa/verify/` · `POST auth/mfa/webauthn/begin/` · `POST auth/mfa/webauthn/complete/` |
@@ -527,8 +532,9 @@ curl -s -X POST $API/auth/logout-all/ -H "$AUTH" -o /dev/null -w '%{http_code}\n
 ```
 
 Audit events: `auth.login_succeeded`, `auth.login_failed`, `auth.refresh_reuse_detected`,
-`auth.mfa_failed`, `auth.sso_failed`, `auth.logout`, `auth.logout_all`,
-`auth.password_changed`, `organization.created`, `organization.updated`, `mfa.totp_enabled`,
+`auth.mfa_failed`, `auth.sso_failed`, `auth.logout`, `auth.logout_all`, `auth.session_revoked`,
+`auth.password_changed`, `auth.password_reset_requested`, `auth.password_reset`,
+`user.sessions_revoked`, `organization.created`, `organization.updated`, `mfa.totp_enabled`,
 `mfa.totp_disabled`, `mfa.webauthn_added`, `mfa.webauthn_removed`,
 `mfa.recovery_codes_generated`, `mfa.reset`, `api_key.created`, `api_key.rotated`,
 `api_key.revoked`, `sso.provider_created`, `sso.provider_updated`,
@@ -568,6 +574,7 @@ of them explicitly.
 | `JWT_AUDIENCE` / `JWT_ISSUER` | `secure-multi-tenant-platform` | `aud` / `iss` claims (verified) |
 | `PASSWORD_MIN_LENGTH` | `12` | Plus Django's similarity, common-password and numeric validators |
 | `INVITATION_TTL_HOURS` | `72` | Invitation expiry |
+| `PASSWORD_RESET_TIMEOUT_SECONDS` / `PASSWORD_RESET_MAX_PER_HOUR` / `FRONTEND_PASSWORD_RESET_URL` | `3600` / `3` / `http://localhost:3000/reset-password?uid={uid}&token={token}` | Reset link lifetime, links sent per address per hour, and the page the link opens |
 | `FRONTEND_INVITE_URL` | `http://localhost:3000/accept-invite?token={token}` | Link placed in invitation emails |
 | `EMAIL_BACKEND` / `DEFAULT_FROM_EMAIL` | console / `no-reply@localhost` | Email delivery (the compose stack uses SMTP to Mailpit) |
 | `EMAIL_HOST` / `EMAIL_PORT` / `EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` / `EMAIL_USE_TLS` / `EMAIL_TIMEOUT` | `localhost` / `25` / none / none / `False` / `10` | SMTP for the worker. Set your provider's host and credentials for live delivery; nothing is sent to real addresses by default |
@@ -630,6 +637,7 @@ PostgreSQL in CI.
 | `test_mfa.py` | TOTP against the RFC 4226 and 6238 test vectors, enrolment, replay within the time step (also by racing requests), stale codes, recovery codes used once, five attempts per challenge, the account throttle, WebAuthn registration and sign-in through `py_webauthn` with a software authenticator (wrong origin, RP ID, presence, counter, replayed assertion, someone else's key), foreign key IDs answering 404, admin reset, the Django admin's code field, key rotation |
 | `test_sso.py` | OIDC against an in-process IdP that checks PKCE and client credentials: 14 forged or broken ID tokens, discovery mix-up, insecure endpoints, state and code replay, key rotation, no IdP crossing tenants or minting super admins, no just-in-time accounts, subject takeover, provider management with an encrypted, never-returned secret, the HTTP client's timeouts and errors |
 | `test_sessions.py` | Refresh-token families: a replayed token revokes the session and is audited once, identical errors, forged session claims, absolute expiry, reasons on every revocation, `prune_sessions`, 8 concurrent refreshes with one winner |
+| `test_account_recovery.py` | Password reset by email (identical answers for unknown and inactive addresses, single-use and expiring links, a link that only fits its own account, sessions ended, rate limit), your own sessions (list, end one, another user's ID answering 404), and an admin signing a member out everywhere |
 | `test_tasks.py` | The task queue: enqueue commits or rolls back with the change, deduplication per scope, tasks run in their tenant's scope, retries with backoff until a final failure, permanent errors, leases taken over from a dead worker, priority and deferral, 4 workers racing with `SKIP LOCKED`; the invitation email: queued with the invitation, token encrypted, delivered once, skipped when revoked, retried and finally marked failed, resent with a new link that kills the old one |
 | `test_invitations.py` | Lifecycle, expiry, revocation, single use, weak passwords, sign-up races, enumeration resistance |
 | `test_audit_log.py` | Immutability (ORM, bulk inserts and upserts, PostgreSQL trigger), context capture, filters, cursor pagination |

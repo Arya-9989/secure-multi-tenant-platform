@@ -110,6 +110,12 @@ MATRIX = (
         lambda w: reverse("user-reset-mfa", args=[w.member_a.pk]),
         (204, 204, 403),
     ),
+    Row(
+        "user-revoke-sessions",
+        "post",
+        lambda w: reverse("user-revoke-sessions", args=[w.member_a.pk]),
+        (204, 204, 403),
+    ),
     Row("ssoprovider-list", "get", lambda w: reverse("ssoprovider-list"), (200, 200, 403)),
     Row(
         "ssoprovider-retrieve",

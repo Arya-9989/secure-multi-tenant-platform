@@ -9,9 +9,12 @@ from apps.accounts.views.auth import (
     LogoutView,
     MeView,
     PasswordChangeView,
+    PasswordResetConfirmView,
+    PasswordResetRequestView,
     RefreshView,
 )
 from apps.accounts.views.invitations import AcceptInvitationView, InvitationViewSet
+from apps.accounts.views.sessions import SessionListView, SessionRevokeView
 from apps.accounts.views.users import UserViewSet
 from apps.apikeys.views import ApiKeyViewSet
 from apps.auditlogs.views import AuditLogViewSet
@@ -41,7 +44,19 @@ api_v1: list[URLPattern | URLResolver] = [
     path("auth/logout/", LogoutView.as_view(), name="auth-logout"),
     path("auth/logout-all/", LogoutAllView.as_view(), name="auth-logout-all"),
     path("auth/me/", MeView.as_view(), name="auth-me"),
+    path("auth/sessions/", SessionListView.as_view(), name="auth-sessions"),
+    path(
+        "auth/sessions/<uuid:session_id>/revoke/",
+        SessionRevokeView.as_view(),
+        name="auth-session-revoke",
+    ),
     path("auth/password/change/", PasswordChangeView.as_view(), name="auth-password-change"),
+    path("auth/password/reset/", PasswordResetRequestView.as_view(), name="auth-password-reset"),
+    path(
+        "auth/password/reset/confirm/",
+        PasswordResetConfirmView.as_view(),
+        name="auth-password-reset-confirm",
+    ),
     path("invitations/accept/", AcceptInvitationView.as_view(), name="invitation-accept"),
     # Second factors (ADR 0004): the signed-in user's own, and the second sign-in step.
     path("auth/mfa/", mfa.MfaStatusView.as_view(), name="mfa-status"),

@@ -21,12 +21,12 @@ class SuiteFile(NamedTuple):
 TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
     SuiteFile(
         "test_permissions_matrix.py",
-        93,
+        97,
         "The role table, executed for every role and for anonymous callers",
     ),
     SuiteFile(
         "test_tenant_isolation.py",
-        76,
+        79,
         "Cross-tenant matrix, foreign-key references, existence oracle, route coverage",
     ),
     SuiteFile(
@@ -93,6 +93,11 @@ TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
         "test_users_and_organizations.py",
         21,
         "Role changes, soft deactivation, database check constraints",
+    ),
+    SuiteFile(
+        "test_account_recovery.py",
+        16,
+        "Password reset without enumeration, your sessions, signing a member out",
     ),
     SuiteFile(
         "test_invitations.py",

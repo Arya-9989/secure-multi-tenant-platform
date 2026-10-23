@@ -178,7 +178,7 @@ class ThemedSwaggerView(SpectacularSwaggerSplitView):
     """
 
     template_name = "web/swagger_ui.html"
-    title = "API reference Â· Secure Multi-Tenant Platform"
+    title = "API reference · Secure Multi-Tenant Platform"
 
 
 # Redoc renders with styled-components, which inserts <style> elements at

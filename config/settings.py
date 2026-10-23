@@ -174,6 +174,15 @@ LOGIN_ACCOUNT_MAX_DELAY_SECONDS: int = env.int("LOGIN_ACCOUNT_MAX_DELAY_SECONDS"
 LOGIN_ACCOUNT_WINDOW_SECONDS: int = env.int("LOGIN_ACCOUNT_WINDOW_SECONDS", default=86_400)
 LOGIN_DEVICE_TRUST_DAYS: int = env.int("LOGIN_DEVICE_TRUST_DAYS", default=90)
 
+# Password reset by email (apps.accounts.password_reset): link lifetime, the frontend
+# page it opens, and how many links one address can be sent per hour.
+PASSWORD_RESET_TIMEOUT: int = env.int("PASSWORD_RESET_TIMEOUT_SECONDS", default=3600)
+PASSWORD_RESET_MAX_PER_HOUR: int = env.int("PASSWORD_RESET_MAX_PER_HOUR", default=3)
+FRONTEND_PASSWORD_RESET_URL: str = env.str(
+    "FRONTEND_PASSWORD_RESET_URL",
+    default="http://localhost:3000/reset-password?uid={uid}&token={token}",
+)
+
 INVITATION_TTL = timedelta(hours=env.int("INVITATION_TTL_HOURS", default=72))
 FRONTEND_INVITE_URL: str = env.str(
     "FRONTEND_INVITE_URL", default="http://localhost:3000/accept-invite?token={token}"

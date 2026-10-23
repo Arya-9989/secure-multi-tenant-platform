@@ -217,6 +217,20 @@ def deactivate_user(*, actor: User, target: User) -> User:
     return target
 
 
+def sign_out_everywhere(*, actor: User, target: User) -> None:
+    """An admin ends every session of a member (the account stays active)."""
+    check_can_administer(actor, target)
+    with transaction.atomic():
+        target = _lock(target)
+        revoke_all_tokens(target, SessionEndReason.REVOKED)
+        record(
+            AuditAction.USER_SESSIONS_REVOKED,
+            actor=actor,
+            organization=target.organization,
+            target=target,
+        )
+
+
 def reactivate_user(*, actor: User, target: User) -> User:
     check_can_administer(actor, target)
     with transaction.atomic():

@@ -78,6 +78,9 @@ OBJECT_CASES = (
     ),
     ObjectCase("auditlog-retrieve", "get", "auditlog-detail", "audit_b", Perm.AUDIT_VIEW),
     ObjectCase("user-reset-mfa", "post", "user-reset-mfa", "member_b", Perm.USER_MANAGE),
+    ObjectCase(
+        "user-revoke-sessions", "post", "user-revoke-sessions", "member_b", Perm.USER_MANAGE
+    ),
     ObjectCase("ssoprovider-retrieve", "get", "ssoprovider-detail", "sso_b", Perm.SSO_MANAGE),
     ObjectCase(
         "ssoprovider-update",
@@ -242,6 +245,10 @@ SELF_SERVICE_OR_PUBLIC_ROUTES = {
     "auth-logout-all",
     "auth-me",
     "auth-password-change",
+    "auth-password-reset",  # public; test_password_reset.py
+    "auth-sessions",  # the caller's own; test_password_reset.py covers foreign IDs
+    "auth-session-revoke",
+    "auth-password-reset-confirm",
     "invitation-accept",
     # The signed-in user's own second factors; foreign credential IDs are covered by
     # test_mfa.py::test_a_foreign_security_key_is_not_found.

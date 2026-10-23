@@ -4,17 +4,17 @@ from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
 from drf_spectacular.utils import OpenApiResponse, extend_schema
-from rest_framework import status
+from rest_framework import serializers, status
 from rest_framework.exceptions import AuthenticationFailed, NotAuthenticated, Throttled
 from rest_framework.generics import GenericAPIView
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.throttling import BaseThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
-from apps.accounts import login_throttle, services, signin
+from apps.accounts import login_throttle, password_reset, services, signin
 from apps.accounts.models import User
 from apps.accounts.serializers.auth import (
     LoginResultSerializer,
@@ -25,6 +25,7 @@ from apps.accounts.serializers.auth import (
     TokenPairResponseSerializer,
 )
 from apps.accounts.serializers.users import MeSerializer
+from apps.common.serializers import StrictSerializer
 from apps.common.tenancy import resolve_user
 from apps.common.throttling import ClientScopedRateThrottle
 from apps.mfa import services as mfa
@@ -185,4 +186,62 @@ class PasswordChangeView(_AuthThrottled, GenericAPIView[Any]):
             current_password=serializer.validated_data["current_password"],
             new_password=serializer.validated_data["new_password"],
         )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class PasswordResetRequestSerializer(StrictSerializer):
+    email = serializers.EmailField(max_length=254)
+
+
+class PasswordResetConfirmSerializer(StrictSerializer):
+    uid = serializers.CharField(max_length=64)
+    token = serializers.CharField(max_length=128)
+    new_password = serializers.CharField(style={"input_type": "password"}, trim_whitespace=False)
+
+
+class PasswordResetRequestView(_AuthThrottled, APIView):
+    authentication_classes = ()
+    permission_classes = (AllowAny,)
+
+    @extend_schema(
+        tags=["auth"],
+        summary="Email a password reset link",
+        description=(
+            "Always answers 202 with the same body, whether or not the address belongs to an "
+            "account: the lookup happens in a background task. At most "
+            "`PASSWORD_RESET_MAX_PER_HOUR` links per address per hour."
+        ),
+        request=PasswordResetRequestSerializer,
+        responses={202: OpenApiResponse(description="Accepted (deliberately unspecific).")},
+        auth=[],
+    )
+    def post(self, request: Request) -> Response:
+        serializer = PasswordResetRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        password_reset.request_reset(serializer.validated_data["email"])
+        return Response(
+            {"detail": "If an account uses that address, a reset link is on its way."},
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+
+class PasswordResetConfirmView(_AuthThrottled, APIView):
+    authentication_classes = ()
+    permission_classes = (AllowAny,)
+
+    @extend_schema(
+        tags=["auth"],
+        summary="Choose a new password with a reset link",
+        description=(
+            "The link works once, expires after `PASSWORD_RESET_TIMEOUT_SECONDS`, and every "
+            "session of the account ends. A second factor is still required at sign-in."
+        ),
+        request=PasswordResetConfirmSerializer,
+        responses={204: None, 400: OpenApiResponse(description="Invalid link or weak password.")},
+        auth=[],
+    )
+    def post(self, request: Request) -> Response:
+        serializer = PasswordResetConfirmSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        password_reset.confirm_reset(**serializer.validated_data)
         return Response(status=status.HTTP_204_NO_CONTENT)
