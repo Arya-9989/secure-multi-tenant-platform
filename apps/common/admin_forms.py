@@ -19,7 +19,7 @@ from apps.mfa import services as mfa
 
 class MfaAdminAuthenticationForm(AdminAuthenticationForm):
     otp = forms.CharField(
-        label="Authentication code",
+        label="Authentication code (if you use one)",
         required=False,
         max_length=32,
         widget=forms.TextInput(

@@ -32,7 +32,11 @@ from django.views.decorators.gzip import gzip_page
 from django.views.decorators.http import condition
 from django.views.generic import TemplateView
 from drf_spectacular.utils import extend_schema
-from drf_spectacular.views import SpectacularRedocView, SpectacularSwaggerSplitView
+from drf_spectacular.views import (
+    SpectacularAPIView,
+    SpectacularRedocView,
+    SpectacularSwaggerSplitView,
+)
 from rest_framework.request import Request
 from rest_framework.response import Response
 
@@ -156,6 +160,14 @@ class LandingView(TemplateView):
             suite=suite_inventory(),
         )
         return context
+
+
+# Compressed: the schema is public and carries no secret or request-reflected input
+# for a compression oracle, and it is the API docs' largest download (Swagger UI and
+# Redoc both fetch it before they can render).
+@method_decorator(gzip_page, name="dispatch")
+class CompressedSchemaView(SpectacularAPIView):
+    pass
 
 
 class ThemedSwaggerView(SpectacularSwaggerSplitView):

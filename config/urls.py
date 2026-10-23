@@ -1,7 +1,6 @@
 from django.conf import settings
 from django.contrib import admin
 from django.urls import URLPattern, URLResolver, include, path
-from drf_spectacular.views import SpectacularAPIView
 from rest_framework.routers import SimpleRouter
 
 from apps.accounts.views.auth import (
@@ -20,7 +19,13 @@ from apps.common.views import LivenessView, ReadinessView
 from apps.mfa import views as mfa
 from apps.organizations.views import OrganizationViewSet
 from apps.sso.views import OidcProviderViewSet, SsoCallbackView, SsoExchangeView, SsoLoginView
-from apps.web.views import LandingView, ThemedRedocView, ThemedSwaggerView, redoc_bundle
+from apps.web.views import (
+    CompressedSchemaView,
+    LandingView,
+    ThemedRedocView,
+    ThemedSwaggerView,
+    redoc_bundle,
+)
 
 router = SimpleRouter()
 router.register("organizations", OrganizationViewSet, basename="organization")
@@ -83,7 +88,7 @@ urlpatterns: list[URLPattern | URLResolver] = [
 
 if settings.API_DOCS_ENABLED:
     urlpatterns += [
-        path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
+        path("api/schema/", CompressedSchemaView.as_view(), name="schema"),
         path("api/docs/", ThemedSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
         path("api/redoc/", ThemedRedocView.as_view(url_name="schema"), name="redoc"),
         path("api/redoc/redoc.standalone.js", redoc_bundle, name="redoc-bundle"),

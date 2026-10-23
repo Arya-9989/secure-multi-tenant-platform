@@ -64,11 +64,19 @@ class TokenPairResponseSerializer(serializers.Serializer[Any]):
     refresh = serializers.CharField()
 
 
-class MfaRequiredResponseSerializer(serializers.Serializer[Any]):
-    mfa_required = serializers.BooleanField(default=True)
-    mfa_token = serializers.CharField(help_text="Send to /auth/mfa/verify/ within 5 minutes.")
+class LoginResultSerializer(serializers.Serializer[Any]):
+    """Either the token pair, or (with MFA enabled) what the second step needs."""
+
+    access = serializers.CharField(required=False, help_text="Without MFA.")
+    refresh = serializers.CharField(required=False, help_text="Without MFA.")
+    mfa_required = serializers.BooleanField(required=False, help_text="With MFA: true.")
+    mfa_token = serializers.CharField(
+        required=False, help_text="With MFA: send to /auth/mfa/verify/ within 5 minutes."
+    )
     methods = serializers.ListField(
-        child=serializers.ChoiceField(choices=["totp", "webauthn", "recovery_code"])
+        child=serializers.ChoiceField(choices=["totp", "webauthn", "recovery_code"]),
+        required=False,
+        help_text="With MFA: the second factors this account can use.",
     )
 
 

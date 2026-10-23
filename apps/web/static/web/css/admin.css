@@ -221,3 +221,7 @@ body {
   #user-tools a, #logout-form button, .breadcrumbs a { min-height: 32px; line-height: 32px; }
   input[type="checkbox"], input[type="radio"] { width: 24px; height: 24px; }
 }
+
+/* The sign-in form's second-factor field (apps.common.admin_forms) matches the
+   width Django gives the email and password fields. */
+.login .form-row #id_otp { width: 100%; }

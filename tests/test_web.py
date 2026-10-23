@@ -393,3 +393,10 @@ def test_story_script_is_served_same_origin_with_safe_headers(api_client: APICli
     assert "script-src 'self'" in response["Content-Security-Policy"]
     body = b"".join(cast(Any, response).streaming_content).decode()
     assert body == (STATIC_DIR / "js" / "story.js").read_text()
+
+
+def test_the_api_schema_is_served_compressed(client: Any) -> None:
+    """The docs pages' largest download; public, so no compression oracle."""
+    response = client.get("/api/schema/?format=json", HTTP_ACCEPT_ENCODING="gzip")
+    assert response.status_code == 200
+    assert response["Content-Encoding"] == "gzip"

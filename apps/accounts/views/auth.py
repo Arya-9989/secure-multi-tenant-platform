@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
-from drf_spectacular.utils import OpenApiResponse, PolymorphicProxySerializer, extend_schema
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status
 from rest_framework.exceptions import AuthenticationFailed, NotAuthenticated, Throttled
 from rest_framework.generics import GenericAPIView
@@ -17,9 +17,9 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from apps.accounts import login_throttle, services, signin
 from apps.accounts.models import User
 from apps.accounts.serializers.auth import (
+    LoginResultSerializer,
     LoginSerializer,
     LogoutSerializer,
-    MfaRequiredResponseSerializer,
     PasswordChangeSerializer,
     RefreshSerializer,
     TokenPairResponseSerializer,
@@ -60,11 +60,7 @@ class LoginView(_AuthThrottled, TokenObtainPairView):
             "ones, so accounts cannot be enumerated."
         ),
         responses={
-            200: PolymorphicProxySerializer(
-                component_name="LoginResult",
-                serializers=[TokenPairResponseSerializer, MfaRequiredResponseSerializer],
-                resource_type_field_name=None,
-            ),
+            200: LoginResultSerializer,
             401: OpenApiResponse(description="Invalid credentials (deliberately generic)."),
             429: OpenApiResponse(description="Too many attempts (see `Retry-After`)."),
         },
