@@ -2,25 +2,26 @@ from __future__ import annotations
 
 from typing import Any
 
-from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.serializers import (
     TokenObtainPairSerializer,
+    TokenObtainSerializer,
     TokenRefreshSerializer,
 )
 from rest_framework_simplejwt.settings import api_settings
-from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
-from rest_framework_simplejwt.utils import datetime_from_epoch
 
+from apps.accounts import sessions
 from apps.accounts.authentication import (
     TenantRefreshToken,
     token_matches_user,
     user_can_authenticate,
 )
 from apps.accounts.models import User
+from apps.accounts.scopes import scope_for_account
+from apps.common import rls
 from apps.common.serializers import StrictSerializer
 
 
@@ -30,6 +31,11 @@ class LoginSerializer(TokenObtainPairSerializer):
     # organization, so the endpoint cannot be used to enumerate accounts.
     default_error_messages = {"no_active_account": _("Invalid email or password.")}
 
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        """Check the credentials only. The view decides what comes next: a second
+        factor (ADR 0004) or the session itself (``apps.accounts.signin``)."""
+        return TokenObtainSerializer.validate(self, attrs)
+
 
 class RefreshSerializer(TokenRefreshSerializer):
     token_class = TenantRefreshToken
@@ -37,44 +43,41 @@ class RefreshSerializer(TokenRefreshSerializer):
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, str]:
         refresh = self.token_class(attrs["refresh"])
-        user = (
-            User.objects.select_related("organization")
-            .filter(pk=refresh.get(api_settings.USER_ID_CLAIM))
-            .first()
-        )
+        user_id = refresh.get(api_settings.USER_ID_CLAIM)
+        # The signature is valid, so the claim names the account to refresh for.
+        rls.bind(scope_for_account(user_id=user_id))
+        user = User.objects.select_related("organization").filter(pk=user_id).first()
         if user is None or not user_can_authenticate(user) or not token_matches_user(refresh, user):
             raise AuthenticationFailed(
                 self.error_messages["no_active_account"], "no_active_account"
             )
-        with transaction.atomic():
-            # Claim the token by blacklisting it *before* minting a new pair. The
-            # unique constraint makes the claim atomic: when two requests race
-            # with the same token, exactly one creates the row and wins.
-            # (SimpleJWT checks the blacklist first and writes it afterwards.)
-            outstanding, _created = OutstandingToken.objects.get_or_create(
-                jti=refresh[api_settings.JTI_CLAIM],
-                defaults={
-                    "user": user,
-                    "token": str(refresh),
-                    "created_at": refresh.current_time,
-                    "expires_at": datetime_from_epoch(refresh["exp"]),
-                },
-            )
-            _entry, claimed = BlacklistedToken.objects.get_or_create(token=outstanding)
-            if not claimed:
-                raise TokenError(_("Token is blacklisted"))
-            data = {"access": str(refresh.access_token)}
-            refresh.set_jti()
-            refresh.set_exp()
-            refresh.set_iat()
-            refresh.outstand()
-            data["refresh"] = str(refresh)
-        return data
+        try:
+            successor = sessions.rotate(refresh, user)
+        except sessions.InvalidSessionError as exc:
+            # The same answer for a replayed, revoked, expired or unknown session.
+            raise TokenError(_("Token is invalid")) from exc
+        return {"access": str(successor.access_token), "refresh": str(successor)}
 
 
 class TokenPairResponseSerializer(serializers.Serializer[Any]):
     access = serializers.CharField()
     refresh = serializers.CharField()
+
+
+class LoginResultSerializer(serializers.Serializer[Any]):
+    """Either the token pair, or (with MFA enabled) what the second step needs."""
+
+    access = serializers.CharField(required=False, help_text="Without MFA.")
+    refresh = serializers.CharField(required=False, help_text="Without MFA.")
+    mfa_required = serializers.BooleanField(required=False, help_text="With MFA: true.")
+    mfa_token = serializers.CharField(
+        required=False, help_text="With MFA: send to /auth/mfa/verify/ within 5 minutes."
+    )
+    methods = serializers.ListField(
+        child=serializers.ChoiceField(choices=["totp", "webauthn", "recovery_code"]),
+        required=False,
+        help_text="With MFA: the second factors this account can use.",
+    )
 
 
 class LogoutSerializer(StrictSerializer):

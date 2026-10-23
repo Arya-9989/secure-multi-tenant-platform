@@ -43,7 +43,6 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     # third party
     "rest_framework",
-    "rest_framework_simplejwt.token_blacklist",
     "django_filters",
     "drf_spectacular",
     "drf_spectacular_sidecar",
@@ -52,6 +51,10 @@ INSTALLED_APPS = [
     "apps.organizations",
     "apps.accounts",
     "apps.auditlogs",
+    "apps.mfa",
+    "apps.sso",
+    "apps.apikeys",
+    "apps.tasks",
     "apps.web",
     # django.contrib.admin, hardened (apps.common.admin_site). Listed after
     # apps.web so that app's admin/base_site.html (theme, icon) takes precedence.
@@ -97,6 +100,16 @@ DATABASES = {
 }
 DATABASES["default"]["CONN_MAX_AGE"] = env.int("DATABASE_CONN_MAX_AGE", default=60)
 DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
+# PostgreSQL row-level security (ADR 0001): this backend applies the current
+# tenant scope to every statement, and the policies fail closed without one.
+if DATABASES["default"]["ENGINE"] == "django.db.backends.postgresql":
+    DATABASES["default"]["ENGINE"] = "apps.common.pgbackend"
+# The role the API connects as. Migrations grant it data privileges; it must not
+# own the schema, be a superuser or have BYPASSRLS.
+DATABASE_RUNTIME_ROLE: str = env.str("DATABASE_RUNTIME_ROLE", default="app_runtime")
+# Refuse database connections whose role would ignore row-level security. Off
+# for migrations and operator commands, which connect as the owner.
+DATABASE_REQUIRE_RLS: bool = env.bool("DATABASE_REQUIRE_RLS", default=not DEBUG)
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REDIS_URL: str = env.str("REDIS_URL", default="")
@@ -110,6 +123,9 @@ CACHES = {
 
 # ---------------------------------------------------------------- auth
 AUTH_USER_MODEL = "accounts.User"
+# Resolves the account's tenant before loading it, so sign-in and session lookups
+# work under row-level security (apps.accounts.backends).
+AUTHENTICATION_BACKENDS = ["apps.accounts.backends.TenantModelBackend"]
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {
@@ -120,6 +136,53 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
+# Fernet keys for secrets stored encrypted (TOTP seeds, OIDC client secrets). The
+# first encrypts; all decrypt. Unset: derived from SECRET_KEY (ADR 0004).
+FIELD_ENCRYPTION_KEYS: list[str] = env.list("FIELD_ENCRYPTION_KEYS", default=[])
+
+# MFA (ADR 0004). WebAuthn's relying party: the site's registrable domain and the
+# exact origins pages calling navigator.credentials are served from.
+MFA_ISSUER: str = env.str("MFA_ISSUER", default="Secure Multi-Tenant Platform")
+MFA_CHALLENGE_TTL_SECONDS: int = env.int("MFA_CHALLENGE_TTL_SECONDS", default=300)
+WEBAUTHN_RP_ID: str = env.str("WEBAUTHN_RP_ID", default="localhost")
+WEBAUTHN_RP_NAME: str = env.str("WEBAUTHN_RP_NAME", default="Secure Multi-Tenant Platform")
+WEBAUTHN_ORIGINS: list[str] = env.list("WEBAUTHN_ORIGINS", default=["http://localhost:8000"])
+
+# SSO via OpenID Connect (ADR 0004). The callback the IdP redirects to (register it
+# with the IdP) and the frontend page that receives the one-time code.
+SSO_CALLBACK_URL: str = env.str(
+    "SSO_CALLBACK_URL", default="http://localhost:8000/api/v1/auth/sso/callback/"
+)
+FRONTEND_SSO_URL: str = env.str("FRONTEND_SSO_URL", default="http://localhost:3000/sso/complete")
+SSO_HTTP_TIMEOUT_SECONDS: float = env.float("SSO_HTTP_TIMEOUT_SECONDS", default=5.0)
+# IdP URLs must be HTTPS. Allow plain HTTP only for a local IdP (the compose Keycloak).
+SSO_ALLOW_HTTP: bool = env.bool("SSO_ALLOW_HTTP", default=False)
+
+# Audit log integrity and streaming (ADR 0006). The chain key signs every audit
+# event's hash; keep it stable and secret (derived from SECRET_KEY when unset).
+AUDIT_CHAIN_KEY: str = env.str("AUDIT_CHAIN_KEY", default="")
+AUDIT_SIEM_URL: str = env.str("AUDIT_SIEM_URL", default="")
+AUDIT_SIEM_SECRET: str = env.str("AUDIT_SIEM_SECRET", default="")
+AUDIT_SIEM_BATCH_SIZE: int = env.int("AUDIT_SIEM_BATCH_SIZE", default=500)
+AUDIT_SIEM_TIMEOUT_SECONDS: float = env.float("AUDIT_SIEM_TIMEOUT_SECONDS", default=5.0)
+AUDIT_SIEM_MAX_ATTEMPTS: int = env.int("AUDIT_SIEM_MAX_ATTEMPTS", default=5)
+
+# Per-account sign-in throttling (ADR 0003): free attempts, then a doubling delay.
+LOGIN_ACCOUNT_FREE_ATTEMPTS: int = env.int("LOGIN_ACCOUNT_FREE_ATTEMPTS", default=5)
+LOGIN_ACCOUNT_BASE_DELAY_SECONDS: int = env.int("LOGIN_ACCOUNT_BASE_DELAY_SECONDS", default=2)
+LOGIN_ACCOUNT_MAX_DELAY_SECONDS: int = env.int("LOGIN_ACCOUNT_MAX_DELAY_SECONDS", default=900)
+LOGIN_ACCOUNT_WINDOW_SECONDS: int = env.int("LOGIN_ACCOUNT_WINDOW_SECONDS", default=86_400)
+LOGIN_DEVICE_TRUST_DAYS: int = env.int("LOGIN_DEVICE_TRUST_DAYS", default=90)
+
+# Password reset by email (apps.accounts.password_reset): link lifetime, the frontend
+# page it opens, and how many links one address can be sent per hour.
+PASSWORD_RESET_TIMEOUT: int = env.int("PASSWORD_RESET_TIMEOUT_SECONDS", default=3600)
+PASSWORD_RESET_MAX_PER_HOUR: int = env.int("PASSWORD_RESET_MAX_PER_HOUR", default=3)
+FRONTEND_PASSWORD_RESET_URL: str = env.str(
+    "FRONTEND_PASSWORD_RESET_URL",
+    default="http://localhost:3000/reset-password?uid={uid}&token={token}",
+)
+
 INVITATION_TTL = timedelta(hours=env.int("INVITATION_TTL_HOURS", default=72))
 FRONTEND_INVITE_URL: str = env.str(
     "FRONTEND_INVITE_URL", default="http://localhost:3000/accept-invite?token={token}"
@@ -128,6 +191,26 @@ DEFAULT_FROM_EMAIL: str = env.str("DEFAULT_FROM_EMAIL", default="no-reply@localh
 EMAIL_BACKEND: str = env.str(
     "EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend"
 )
+EMAIL_HOST: str = env.str("EMAIL_HOST", default="localhost")
+EMAIL_PORT: int = env.int("EMAIL_PORT", default=25)
+EMAIL_HOST_USER: str = env.str("EMAIL_HOST_USER", default="")
+EMAIL_HOST_PASSWORD: str = env.str("EMAIL_HOST_PASSWORD", default="")
+EMAIL_USE_TLS: bool = env.bool("EMAIL_USE_TLS", default=False)
+EMAIL_TIMEOUT: int = env.int("EMAIL_TIMEOUT", default=10)
+
+# Background tasks (ADR 0007): Django's task API, stored in the database and run by
+# `manage.py run_worker`. Retries back off exponentially with jitter.
+TASKS = {
+    "default": {
+        "BACKEND": "apps.tasks.backend.DatabaseBackend",
+        "OPTIONS": {
+            "max_attempts": env.int("TASK_MAX_ATTEMPTS", default=5),
+            "base_delay": env.float("TASK_RETRY_BASE_DELAY_SECONDS", default=10.0),
+            "max_delay": env.float("TASK_RETRY_MAX_DELAY_SECONDS", default=3600.0),
+            "lease_seconds": env.int("TASK_LEASE_SECONDS", default=300),
+        },
+    }
+}
 
 # ---------------------------------------------------------------- DRF / JWT
 # Number of trusted reverse proxies in front of the app. Used both for DRF
@@ -136,7 +219,11 @@ EMAIL_BACKEND: str = env.str(
 NUM_PROXIES: int = env.int("NUM_PROXIES", default=0)
 
 REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": ("apps.accounts.authentication.TenantJWTAuthentication",),
+    "DEFAULT_AUTHENTICATION_CLASSES": (
+        "apps.accounts.authentication.TenantJWTAuthentication",
+        # Services: scoped, read-only, tenant-bound keys (ADR 0005).
+        "apps.apikeys.authentication.ApiKeyAuthentication",
+    ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_FILTER_BACKENDS": (
         "django_filters.rest_framework.DjangoFilterBackend",
@@ -165,8 +252,10 @@ REST_FRAMEWORK = {
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=env.int("JWT_ACCESS_TTL_MINUTES", default=5)),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=env.int("JWT_REFRESH_TTL_DAYS", default=1)),
+    # Rotation and reuse detection are ours (refresh-token families, ADR 0002);
+    # SimpleJWT only signs and verifies.
     "ROTATE_REFRESH_TOKENS": True,
-    "BLACKLIST_AFTER_ROTATION": True,
+    "BLACKLIST_AFTER_ROTATION": False,
     "UPDATE_LAST_LOGIN": True,
     "ALGORITHM": "HS256",
     "SIGNING_KEY": env.str("JWT_SIGNING_KEY", default=SECRET_KEY),
@@ -178,6 +267,8 @@ SIMPLE_JWT = {
     "USER_ID_CLAIM": "user_id",
     "USER_AUTHENTICATION_RULE": "apps.accounts.authentication.user_can_authenticate",
 }
+# Absolute lifetime of a session, however often its refresh token rotates.
+JWT_SESSION_MAX_AGE = timedelta(days=env.int("JWT_SESSION_MAX_AGE_DAYS", default=30))
 if not DEBUG and len(SIMPLE_JWT["SIGNING_KEY"]) < 32:
     raise ImproperlyConfigured("The JWT signing key must be at least 32 characters (RFC 7518).")
 
@@ -219,6 +310,9 @@ SPECTACULAR_SETTINGS = {
         {"name": "users", "description": "Tenant-scoped user directory and administration."},
         {"name": "invitations", "description": "Expiring, single-use, token-based onboarding."},
         {"name": "audit-logs", "description": "Append-only, tenant-scoped security audit trail."},
+        {"name": "mfa", "description": "Your second factors: authenticator app, security keys."},
+        {"name": "sso", "description": "Single sign-on through your organization's OIDC IdP."},
+        {"name": "api-keys", "description": "Scoped, read-only, expiring keys for services."},
         {"name": "health", "description": "Liveness and readiness probes."},
     ],
 }

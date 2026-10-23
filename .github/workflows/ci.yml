@@ -51,17 +51,28 @@ jobs:
       postgres:
         image: postgres:17-alpine
         env:
-          POSTGRES_DB: app
-          POSTGRES_USER: app
-          POSTGRES_PASSWORD: app
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U app -d app"
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
           --health-interval 5s
           --health-timeout 3s
           --health-retries 20
     env:
-      DATABASE_URL: postgres://app:app@localhost:5432/app
+      # Per-account sign-in throttling is also tested against Redis (ADR 0003).
+      TEST_REDIS_URL: redis://localhost:6379/15
+      # The suite builds its database as the schema owner (not a superuser, so
+      # FORCE ROW LEVEL SECURITY binds it) and runs every test as the runtime role.
+      DATABASE_URL: postgres://app_owner:app_owner@localhost:5432/app
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
@@ -70,6 +81,16 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           enable-cache: true
       - run: uv sync --locked
+      - name: Database roles (owner and runtime, ADR 0001)
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE app_owner LOGIN PASSWORD 'app_owner' CREATEDB NOSUPERUSER NOBYPASSRLS;
+          CREATE ROLE app_runtime NOLOGIN NOSUPERUSER NOBYPASSRLS;
+          GRANT app_runtime TO app_owner;
+          CREATE DATABASE app OWNER app_owner;
+          SQL
       - name: pytest
         run: uv run pytest --cov --cov-report=term --cov-report=xml
       - name: Coverage summary
@@ -126,9 +147,80 @@ jobs:
             "http://localhost:8000/api/v1/users/$GRACE_ID/" -H "Authorization: Bearer $ALICE")
           echo "Cross-tenant read returned $STATUS"
           test "$STATUS" = "404"
+      - name: Invitation email through the worker to Mailpit
+        run: |
+          set -euo pipefail
+          ALICE=$(curl -fsS -X POST http://localhost:8000/api/v1/auth/login/ \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"alice@acme.test","password":"Demo-Passw0rd!2026"}' | jq -r .access)
+          ID=$(curl -fsS -X POST http://localhost:8000/api/v1/invitations/ -H "Authorization: Bearer $ALICE" \
+            -H 'Content-Type: application/json' -d '{"email":"carol@acme.test","role":"MEMBER"}' | jq -r .id)
+          for _ in $(seq 1 30); do
+            STATUS=$(curl -fsS "http://localhost:8000/api/v1/invitations/$ID/" -H "Authorization: Bearer $ALICE" | jq -r .email_status)
+            [ "$STATUS" = "sent" ] && break
+            sleep 1
+          done
+          echo "Invitation email: $STATUS"
+          test "$STATUS" = "sent"
+          curl -fsS http://localhost:8025/api/v1/messages | jq -e '.messages[0].To[0].Address == "carol@acme.test"'
+      - name: Row-level security smoke test
+        run: |
+          set -euo pipefail
+          count() { docker compose exec -T db psql -U "$1" -d app -tAc 'SELECT count(*) FROM accounts_user'; }
+          # Without a tenant scope, neither the API's role nor the owner sees a row.
+          test "$(count app_runtime)" = "0"
+          test "$(count app_owner)" = "0"
+          test "$(count postgres)" = "5"   # positive control: the superuser bypasses RLS
+          # The API refuses to run as a role that would bypass row-level security.
+          if docker compose run --rm --no-deps -e DATABASE_URL=postgres://app_owner:app_owner@db:5432/app               api python manage.py shell -c 'from apps.accounts.models import User; User.objects.count()'; then
+            echo "the owner role was accepted" >&2; exit 1
+          fi
+      - name: Audit log streamed to a SIEM (Vector), chains verified, partitions ahead
+        run: |
+          set -euo pipefail
+          docker compose --profile siem up -d --wait vector audit-shipper
+          docker compose --profile siem run --rm audit-shipper python manage.py stream_audit_log --once
+          docker compose --profile siem exec -T vector sh -c 'cat /var/lib/vector/audit/*.ndjson' > siem.ndjson
+          grep -q '"action":"auth.login_succeeded"' siem.ndjson
+          grep -q '"hash":"' siem.ndjson
+          docker compose exec -T api python manage.py verify_audit_chain
+          docker compose run --rm migrate python manage.py audit_partitions --months-ahead 3
+      - name: One trace from the API into the worker (Jaeger)
+        env:
+          OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+        run: |
+          set -euo pipefail
+          docker compose --profile tracing up -d --wait jaeger api worker
+          ALICE=$(curl -fsS -X POST http://localhost:8000/api/v1/auth/login/             -H 'Content-Type: application/json'             -d '{"email":"alice@acme.test","password":"Demo-Passw0rd!2026"}' | jq -r .access)
+          curl -fsS -o /dev/null -X POST http://localhost:8000/api/v1/invitations/ -H "Authorization: Bearer $ALICE"             -H 'X-Request-ID: ci-trace-0000001' -H 'Content-Type: application/json'             -d '{"email":"dave@acme.test","role":"MEMBER"}'
+          for _ in $(seq 1 30); do
+            curl -fsS 'http://localhost:16686/api/traces?service=platform-api&tags=%7B%22request.id%22%3A%22ci-trace-0000001%22%7D' > traces.json || true
+            jq -e '[.data[].processes[].serviceName] | index("platform-worker")' traces.json && break
+            sleep 2
+          done
+          jq -e '[.data[].spans[].tags[] | select(.key == "tenant.id")] | length > 0' traces.json
+          jq -e '[.data[].processes[].serviceName] | index("platform-worker")' traces.json
       - name: Container logs
         if: failure()
         run: docker compose logs
       - name: Tear down
         if: always()
-        run: docker compose down -v
+        run: docker compose --profile siem --profile tracing down -v
+
+  sso-e2e:
+    name: SSO end to end (Keycloak)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Start the stack with Keycloak
+        run: docker compose --profile sso up -d --build --wait --wait-timeout 300 keycloak api
+      - name: Seed the demo tenants
+        run: docker compose exec -T api python manage.py seed_demo --force
+      - name: Sign in through Keycloak (browser leg played inside the compose network)
+        run: docker compose --profile sso run --rm sso-e2e
+      - name: Container logs
+        if: failure()
+        run: docker compose --profile sso logs
+      - name: Tear down
+        if: always()
+        run: docker compose --profile sso down -v

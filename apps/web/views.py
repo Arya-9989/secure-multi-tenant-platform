@@ -32,7 +32,11 @@ from django.views.decorators.gzip import gzip_page
 from django.views.decorators.http import condition
 from django.views.generic import TemplateView
 from drf_spectacular.utils import extend_schema
-from drf_spectacular.views import SpectacularRedocView, SpectacularSwaggerSplitView
+from drf_spectacular.views import (
+    SpectacularAPIView,
+    SpectacularRedocView,
+    SpectacularSwaggerSplitView,
+)
 from rest_framework.request import Request
 from rest_framework.response import Response
 
@@ -48,6 +52,8 @@ PERMISSION_LABELS: dict[Perm, str] = {
     Perm.USER_MANAGE: "Change roles, deactivate and reactivate users",
     Perm.INVITATION_MANAGE: "Invite people and revoke invitations",
     Perm.AUDIT_VIEW: "Query the audit log",
+    Perm.SSO_MANAGE: "Configure single sign-on",
+    Perm.API_KEY_MANAGE: "Issue and revoke API keys for services",
 }
 
 ROLE_SHORT_LABELS: dict[Role, str] = {
@@ -156,6 +162,14 @@ class LandingView(TemplateView):
         return context
 
 
+# Compressed: the schema is public and carries no secret or request-reflected input
+# for a compression oracle, and it is the API docs' largest download (Swagger UI and
+# Redoc both fetch it before they can render).
+@method_decorator(gzip_page, name="dispatch")
+class CompressedSchemaView(SpectacularAPIView):
+    pass
+
+
 class ThemedSwaggerView(SpectacularSwaggerSplitView):
     """Swagger UI with the site's type, colours and dark mode.
 
@@ -164,7 +178,7 @@ class ThemedSwaggerView(SpectacularSwaggerSplitView):
     """
 
     template_name = "web/swagger_ui.html"
-    title = "API reference Â· Secure Multi-Tenant Platform"
+    title = "API reference · Secure Multi-Tenant Platform"
 
 
 # Redoc renders with styled-components, which inserts <style> elements at

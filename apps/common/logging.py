@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from apps.common.context import get_request_context
+from apps.common.tracing import trace_ids
 
 _RESERVED_ATTRS = frozenset(
     vars(logging.LogRecord("", logging.INFO, "", 0, "", (), None)).keys()
@@ -34,6 +35,7 @@ class JsonFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
             "request_id": getattr(record, "request_id", "-"),
+            **trace_ids(),  # joins the line to its trace when tracing is on (ADR 0008)
         }
         for key, value in record.__dict__.items():
             if key not in _RESERVED_ATTRS and not key.startswith("_"):

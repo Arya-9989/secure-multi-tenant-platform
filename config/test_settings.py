@@ -10,6 +10,9 @@ os.environ.setdefault("DJANGO_SECRET_KEY", "test-only-secret-key-not-used-anywhe
 os.environ.setdefault("DJANGO_ALLOWED_HOSTS", "testserver,localhost")
 os.environ.setdefault("DJANGO_SECURE_SSL_REDIRECT", "False")
 os.environ.setdefault("LOG_LEVEL", "WARNING")
+# The suite connects as the owner to build the test database, then works as the
+# runtime role (tests/conftest.py), so the connection check is done by tests.
+os.environ.setdefault("DATABASE_REQUIRE_RLS", "False")
 
 from config.settings import *  # noqa: F403
 

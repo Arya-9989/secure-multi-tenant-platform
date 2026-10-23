@@ -21,13 +21,38 @@ class SuiteFile(NamedTuple):
 TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
     SuiteFile(
         "test_permissions_matrix.py",
-        61,
+        97,
         "The role table, executed for every role and for anonymous callers",
     ),
     SuiteFile(
         "test_tenant_isolation.py",
-        48,
+        79,
         "Cross-tenant matrix, foreign-key references, existence oracle, route coverage",
+    ),
+    SuiteFile(
+        "test_sso.py",
+        56,
+        "OIDC with PKCE: each ID-token check attacked, no IdP crosses tenants",
+    ),
+    SuiteFile(
+        "test_row_level_security.py",
+        51,
+        "Raw SQL past the ORM, no scope, a fresh connection: PostgreSQL still isolates",
+    ),
+    SuiteFile(
+        "test_mfa.py",
+        45,
+        "TOTP against the RFC vectors, WebAuthn end to end, every replay refused",
+    ),
+    SuiteFile(
+        "test_api_keys.py",
+        39,
+        "Keys for services: hashed, read-only, scoped per endpoint, one tenant only",
+    ),
+    SuiteFile(
+        "test_web.py",
+        36,
+        "This page, the API docs, error pages and the Content Security Policy",
     ),
     SuiteFile(
         "test_privilege_escalation.py",
@@ -35,9 +60,9 @@ TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
         "Mass assignment, self-promotion, last-admin invariant, forged tokens",
     ),
     SuiteFile(
-        "test_web.py",
-        35,
-        "This page, the API docs, error pages and the Content Security Policy",
+        "test_login_throttling.py",
+        27,
+        "Per-account delays a botnet can't dodge and a stranger can't lock you out with",
     ),
     SuiteFile(
         "test_platform.py",
@@ -45,14 +70,34 @@ TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
         "Health probes, OpenAPI schema, request IDs, JSON logs, secure settings",
     ),
     SuiteFile(
+        "test_tasks.py",
+        24,
+        "The task queue and invitation email: outbox, scopes, retries, leases, idempotency",
+    ),
+    SuiteFile(
+        "test_audit_chain.py",
+        23,
+        "Hash chains catch edits, deletions and reorders; partitions, retention, SIEM",
+    ),
+    SuiteFile(
         "test_auth.py",
-        22,
-        "Rotation races, spoof-proof throttling, logout everywhere, deactivation",
+        21,
+        "Login auditing, spoof-proof throttling, logout everywhere, deactivation",
+    ),
+    SuiteFile(
+        "test_sessions.py",
+        21,
+        "Refresh-token families: a replayed token ends the session, races have one winner",
     ),
     SuiteFile(
         "test_users_and_organizations.py",
         21,
         "Role changes, soft deactivation, database check constraints",
+    ),
+    SuiteFile(
+        "test_account_recovery.py",
+        16,
+        "Password reset without enumeration, your sessions, signing a member out",
     ),
     SuiteFile(
         "test_invitations.py",
@@ -61,8 +106,13 @@ TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
     ),
     SuiteFile(
         "test_audit_log.py",
-        12,
+        13,
         "Immutability in the ORM and in the PostgreSQL trigger, filters",
+    ),
+    SuiteFile(
+        "test_tracing.py",
+        12,
+        "Spans named by route with request and tenant IDs, one trace into the worker, no PII",
     ),
     SuiteFile(
         "test_admin.py",

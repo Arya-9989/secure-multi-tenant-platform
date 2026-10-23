@@ -1,32 +1,61 @@
 # Local, production-like stack: gunicorn + PostgreSQL + Redis.
-#   docker compose up --build -d
+#   docker compose up --build -d --wait
 #   docker compose exec api python manage.py seed_demo --force
 #   open http://localhost:8000/api/docs/
+#
+# The database has two roles (docker/postgres/initdb/10-roles.sh, ADR 0001):
+# migrations run as the schema owner, the API as a runtime role that row-level
+# security applies to.
 name: secure-multi-tenant-platform
 
 x-app-env: &app-env
   DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-compose-local-only-secret-change-me-0123456789abcdef}
-  DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+  DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,api
   # Plain HTTP on localhost. In a real deployment TLS terminates at your proxy:
   # set DJANGO_BEHIND_TLS_PROXY=True and keep the secure defaults below enabled.
   DJANGO_SECURE_SSL_REDIRECT: "False"
   DJANGO_SECURE_COOKIES: "False"
   DJANGO_SECURE_HSTS_SECONDS: "0"
-  DATABASE_URL: postgres://app:app@db:5432/app
+  # The API connects as the runtime role and refuses any role that bypasses RLS.
+  DATABASE_URL: postgres://app_runtime:${APP_DB_RUNTIME_PASSWORD:-app_runtime}@db:5432/app
+  DATABASE_REQUIRE_RLS: "True"
   REDIS_URL: redis://redis:6379/0
   LOG_FORMAT: json
+  # SSO (ADR 0004). The only IdP on this local stack is the Keycloak below, over
+  # plain HTTP; a real deployment leaves SSO_ALLOW_HTTP off (HTTPS required).
+  SSO_ALLOW_HTTP: "True"
+  SSO_CALLBACK_URL: ${SSO_CALLBACK_URL:-http://api:8000/api/v1/auth/sso/callback/}
+  # Invitation email (ADR 0007): sent by the worker to Mailpit, which keeps everything.
+  EMAIL_BACKEND: django.core.mail.backends.smtp.EmailBackend
+  EMAIL_HOST: mailpit
+  EMAIL_PORT: "1025"
+  DEFAULT_FROM_EMAIL: no-reply@platform.test
+  # Tracing (ADR 0008): off unless set, e.g.
+  #   OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318 docker compose --profile tracing up -d
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+  OTEL_SERVICE_NAME: platform-api
+
+# Migrations and operator commands connect as the schema owner.
+x-owner-env: &owner-env
+  <<: *app-env
+  DATABASE_URL: postgres://app_owner:${APP_DB_OWNER_PASSWORD:-app_owner}@db:5432/app
+  DATABASE_REQUIRE_RLS: "False"
 
 services:
   db:
     image: postgres:17-alpine
     environment:
-      POSTGRES_DB: app
-      POSTGRES_USER: app
-      POSTGRES_PASSWORD: app
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      APP_DB_OWNER_PASSWORD: ${APP_DB_OWNER_PASSWORD:-app_owner}
+      APP_DB_RUNTIME_PASSWORD: ${APP_DB_RUNTIME_PASSWORD:-app_runtime}
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      # Over TCP: the image's init phase (which creates the roles) listens on a
+      # socket only, so this passes once the real server is up.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U app_owner -d app"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -43,11 +72,47 @@ services:
   migrate:
     build: .
     command: ["python", "manage.py", "migrate", "--noinput"]
-    environment: *app-env
+    environment: *owner-env
     depends_on:
       db:
         condition: service_healthy
     restart: "no"
+
+  mailpit:
+    image: axllent/mailpit:v1.27.10
+    ports:
+      - "127.0.0.1:${MAILPIT_PORT:-8025}:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker:
+    build: .
+    command: ["python", "manage.py", "run_worker", "--heartbeat", "/tmp/worker-heartbeat"]
+    environment:
+      <<: *app-env
+      OTEL_SERVICE_NAME: platform-worker
+    healthcheck:
+      # Not the image's HTTP check: healthy while the poll loop keeps reaching the database.
+      test: ["CMD", "python", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/worker-heartbeat') > 60)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s  # SIGTERM: it finishes the task in hand
+    restart: unless-stopped
 
   api:
     build: .
@@ -66,5 +131,98 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
 
+  # ------------------------------------------------ SSO, local and e2e only
+  #   docker compose --profile sso up -d --build --wait
+  #   docker compose exec api python manage.py seed_demo --force
+  #   docker compose --profile sso run --rm sso-e2e
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.5.3
+    profiles: ["sso"]
+    command: ["start-dev", "--import-realm", "--http-port=8080", "--health-enabled=true"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+    volumes:
+      - ./docker/keycloak:/opt/keycloak/data/import:ro
+    ports:
+      - "127.0.0.1:${KEYCLOAK_PORT:-8080}:8080"
+    healthcheck:
+      # The image has no curl: ask the management port with bash's /dev/tcp.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.0\r\n\r\n' >&3 && grep -q UP <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+  sso-e2e:
+    image: python:3.12-slim-trixie
+    profiles: ["sso"]
+    command: ["python", "/e2e/sso_keycloak.py"]
+    volumes:
+      - ./e2e:/e2e:ro
+    environment:
+      API_URL: http://api:8000
+      KEYCLOAK_URL: http://keycloak:8080
+    depends_on:
+      api:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    restart: "no"
+
+  # ------------------------------------------------ SIEM streaming, local only
+  #   docker compose --profile siem up -d --build --wait
+  #   docker compose exec vector sh -c 'cat /var/lib/vector/audit/*.ndjson'
+  vector:
+    image: timberio/vector:0.54.0-alpine
+    profiles: ["siem"]
+    command: ["--config", "/etc/vector/vector.yaml"]
+    volumes:
+      - ./docker/vector/vector.yaml:/etc/vector/vector.yaml:ro
+      - vector_data:/var/lib/vector
+    ports:
+      - "127.0.0.1:${VECTOR_PORT:-8686}:8686"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8686/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  audit-shipper:
+    build: .
+    profiles: ["siem"]
+    command: ["python", "manage.py", "stream_audit_log", "--interval", "5", "--heartbeat", "/tmp/shipper-heartbeat"]
+    healthcheck:
+      # Not the image's HTTP check: healthy while the SIEM keeps accepting the stream.
+      test: ["CMD", "python", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/shipper-heartbeat') > 60)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    environment:
+      <<: *app-env
+      AUDIT_SIEM_URL: http://vector:9000/audit
+      AUDIT_SIEM_SECRET: ${AUDIT_SIEM_SECRET:-compose-local-siem-secret-change-me}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      vector:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  # ------------------------------------------------ tracing, local only
+  #   OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318 docker compose --profile tracing up -d
+  #   open http://localhost:16686/
+  jaeger:
+    image: jaegertracing/jaeger:2.11.0
+    profiles: ["tracing"]
+    ports:
+      - "127.0.0.1:${JAEGER_PORT:-16686}:16686"
+
 volumes:
   pgdata:
+  vector_data:

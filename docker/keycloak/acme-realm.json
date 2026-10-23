@@ -1,0 +1,84 @@
+{
+  "realm": "acme",
+  "displayName": "Acme Corp (local IdP for SSO tests)",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "clients": [
+    {
+      "clientId": "secure-multi-tenant-platform",
+      "name": "Secure Multi-Tenant Platform",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "local-keycloak-client-secret-not-for-production",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://api:8000/api/v1/auth/sso/callback/",
+        "http://localhost:5431/api/v1/auth/sso/callback/"
+      ],
+      "webOrigins": [],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "+"
+      },
+      "defaultClientScopes": [
+        "profile",
+        "email"
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "email": "alice@acme.test",
+      "emailVerified": true,
+      "firstName": "Alice",
+      "lastName": "Admin",
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Keycloak-Passw0rd!",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "grace",
+      "email": "grace@globex.test",
+      "emailVerified": true,
+      "firstName": "Grace",
+      "lastName": "Globex",
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Keycloak-Passw0rd!",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "bob",
+      "email": "bob@acme.test",
+      "emailVerified": false,
+      "firstName": "Bob",
+      "lastName": "Unverified",
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Keycloak-Passw0rd!",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

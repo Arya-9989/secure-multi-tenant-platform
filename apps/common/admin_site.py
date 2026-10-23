@@ -15,9 +15,11 @@ from django.db import transaction
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.template.response import TemplateResponse
 
-from apps.accounts import services
+from apps.accounts import login_throttle, services
+from apps.accounts.models import SessionEndReason
 from apps.auditlogs.models import AuditAction
 from apps.auditlogs.services import record
+from apps.common.admin_forms import MfaAdminAuthenticationForm
 from apps.common.tenancy import resolve_user
 from apps.common.throttling import AdminLoginThrottle
 from apps.web.errors import too_many_requests
@@ -27,6 +29,7 @@ ADMIN_CHANNEL = "admin"
 
 class PlatformAdminSite(admin.AdminSite):
     site_header = "Secure Multi-Tenant Platform"
+    login_form = MfaAdminAuthenticationForm  # the second factor applies here too
     site_title = "Platform admin"
     index_title = "Platform administration"
 
@@ -38,12 +41,19 @@ class PlatformAdminSite(admin.AdminSite):
         throttle = AdminLoginThrottle()
         if not throttle.allows(request):
             return too_many_requests(request, throttle.wait())
+        # The API's per-account buckets and device cookie apply here too (ADR 0003).
+        email = str(request.POST.get("username", ""))
+        decision = login_throttle.check(email, login_throttle.device_token_from(request))
+        if not decision.allowed:
+            return too_many_requests(request, decision.retry_after)
 
         response = super().login(request, extra_context)
         # A valid sign-in redirects; a rejected one re-renders the form. (request.user
         # alone is not enough: the session may already belong to someone.)
         user = resolve_user(request.user)
         if isinstance(response, HttpResponseRedirect) and user is not None:
+            login_throttle.succeeded(decision)
+            login_throttle.set_device_cookie(response, request, user.email)
             record(
                 AuditAction.LOGIN_SUCCEEDED,
                 actor=user,
@@ -51,9 +61,7 @@ class PlatformAdminSite(admin.AdminSite):
                 metadata={"channel": ADMIN_CHANNEL},
             )
         else:
-            services.record_failed_login(
-                str(request.POST.get("username", "")), channel=ADMIN_CHANNEL
-            )
+            services.record_failed_login(email, channel=ADMIN_CHANNEL, delay=decision.delay)
         return response
 
     def password_change(
@@ -63,7 +71,7 @@ class PlatformAdminSite(admin.AdminSite):
         user = resolve_user(request.user)
         if request.method == "POST" and response.status_code == 302 and user is not None:
             with transaction.atomic():
-                services.revoke_all_tokens(user)
+                services.revoke_all_tokens(user, SessionEndReason.PASSWORD_CHANGED)
                 record(
                     AuditAction.PASSWORD_CHANGED,
                     actor=user,

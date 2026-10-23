@@ -35,6 +35,17 @@ class Perm(StrEnum):
     USER_MANAGE = "user:manage"
     INVITATION_MANAGE = "invitation:manage"
     AUDIT_VIEW = "audit:view"
+    SSO_MANAGE = "sso:manage"
+    API_KEY_MANAGE = "api_key:manage"
+
+
+class ApiScope(StrEnum):
+    """What a service's API key may read (ADR 0005). Keys are read-only by design."""
+
+    ORGANIZATION_READ = "organization:read"
+    USERS_READ = "users:read"
+    INVITATIONS_READ = "invitations:read"
+    AUDIT_READ = "audit:read"
 
 
 ROLE_PERMISSIONS: Mapping[str, frozenset[Perm]] = {
@@ -46,6 +57,8 @@ ROLE_PERMISSIONS: Mapping[str, frozenset[Perm]] = {
             Perm.USER_MANAGE,
             Perm.INVITATION_MANAGE,
             Perm.AUDIT_VIEW,
+            Perm.SSO_MANAGE,
+            Perm.API_KEY_MANAGE,
         }
     ),
     Role.MEMBER: frozenset({Perm.ORGANIZATION_VIEW, Perm.USER_VIEW}),

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 from django.db import transaction
 from django.utils.text import slugify
 
+from apps.accounts.models import SessionEndReason
 from apps.accounts.roles import Perm
 from apps.accounts.services import revoke_tokens_of
 from apps.auditlogs.models import AuditAction
@@ -64,7 +65,7 @@ def update_organization(
             # Members are cut off on their next request anyway (authentication
             # checks the organization). Revoking their tokens as well means a
             # later reactivation does not bring old sessions back to life.
-            revoke_tokens_of(organization.users.all())
+            revoke_tokens_of(organization.users.all(), SessionEndReason.ORGANIZATION_DEACTIVATED)
         record(
             AuditAction.ORGANIZATION_UPDATED,
             actor=actor,

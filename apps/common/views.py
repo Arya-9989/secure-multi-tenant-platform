@@ -17,7 +17,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet
 
-from apps.accounts.roles import Perm
+from apps.accounts.roles import ApiScope, Perm
 from apps.common.permissions import HasRolePermission, TenantObjectPermission
 from apps.common.tenancy import TenantQuerySet, resolve_user
 
@@ -50,6 +50,8 @@ class TenantScopedViewSet(GenericViewSet[_M]):
 
     permission_classes: Sequence[type[BasePermission]] = ()
     required_permissions: ClassVar[Mapping[str, Perm]] = {}
+    # Read actions a service's API key may call, and the scope each needs (ADR 0005).
+    api_key_scopes: ClassVar[Mapping[str, ApiScope]] = {}
     lookup_value_regex = UUID_PATTERN
 
     @property

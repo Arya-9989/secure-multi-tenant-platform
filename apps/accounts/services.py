@@ -18,26 +18,29 @@ from typing import Any
 from django.conf import settings
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.core.mail import send_mail
 from django.db import IntegrityError, transaction
 from django.db.models import F, QuerySet
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.settings import api_settings as jwt_settings
-from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 
+from apps.accounts import sessions
 from apps.accounts.authentication import TenantRefreshToken
 from apps.accounts.models import (
+    EmailStatus,
     Invitation,
     InvitationStatus,
+    SessionEndReason,
     User,
     hash_invitation_token,
     normalize_email,
 )
 from apps.accounts.roles import ASSIGNABLE_ROLES, Perm, Role
+from apps.accounts.scopes import scope_for_account, scope_for_invitation
 from apps.auditlogs.models import AuditAction
 from apps.auditlogs.services import record
+from apps.common import crypto, rls
 from apps.common.guards import require_permission, require_same_tenant
 from apps.organizations.models import Organization
 
@@ -47,57 +50,63 @@ INVALID_INVITATION = "This invitation is invalid or has expired."
 
 
 # ---------------------------------------------------------------- sessions
-def record_failed_login(email: str, *, channel: str | None = None) -> None:
+def record_failed_login(email: str, *, channel: str | None = None, delay: int = 0) -> None:
     """Audit a failed sign-in (API or admin) without revealing whether the account exists."""
     email = normalize_email(email)[:254]
-    known = (
-        User.objects.select_related("organization").filter(email=email).first() if email else None
-    )
     # Attributed to the targeted account's tenant so its admins can see attacks
-    # on their users; attempts against unknown emails are platform-level.
-    metadata: dict[str, str] = {"email": email}
-    if channel:
-        metadata["channel"] = channel
-    record(
-        AuditAction.LOGIN_FAILED,
-        organization=known.organization if known else None,
-        target=known,
-        metadata=metadata,
-    )
+    # on their users; attempts against unknown emails are platform-level events,
+    # the one write before authentication that needs platform scope.
+    account_scope = scope_for_account(email=email) if email else rls.NO_SCOPE
+    with rls.scope(rls.PLATFORM if account_scope == rls.NO_SCOPE else account_scope):
+        known = (
+            User.objects.select_related("organization").filter(email=email).first()
+            if email
+            else None
+        )
+        metadata: dict[str, str | int] = {"email": email}
+        if channel:
+            metadata["channel"] = channel
+        if delay:  # this failure started a per-account delay (ADR 0003)
+            metadata["next_attempt_delay"] = delay
+        record(
+            AuditAction.LOGIN_FAILED,
+            organization=known.organization if known else None,
+            target=known,
+            metadata=metadata,
+        )
 
 
-def revoke_all_tokens(user: User) -> None:
+def revoke_all_tokens(user: User, reason: SessionEndReason) -> None:
     """Invalidate every access and refresh token issued to ``user`` so far."""
-    revoke_tokens_of(User.objects.filter(pk=user.pk))
+    revoke_tokens_of(User.objects.filter(pk=user.pk), reason)
     user.refresh_from_db(fields=["token_version"])
 
 
-def revoke_tokens_of(users: QuerySet[User]) -> None:
+def revoke_tokens_of(users: QuerySet[User], reason: SessionEndReason) -> None:
     """Invalidate every access and refresh token issued to these users so far."""
     users.update(token_version=F("token_version") + 1)
-    outstanding = OutstandingToken.objects.filter(user__in=users, blacklistedtoken__isnull=True)
-    BlacklistedToken.objects.bulk_create(
-        [BlacklistedToken(token=token) for token in outstanding], ignore_conflicts=True
-    )
+    sessions.end_all(users, reason)
 
 
 def logout(user: User, raw_refresh_token: str) -> None:
+    """End the session the refresh token belongs to; its access tokens die with it."""
     invalid = ValidationError({"refresh": ["Token is invalid or expired."]})
     try:
         token = TenantRefreshToken(raw_refresh_token)  # type: ignore[arg-type]
     except TokenError as exc:
         raise invalid from exc
-    # Never let one user blacklist another user's session.
+    # Never let one user end another user's session.
     if str(token.get(jwt_settings.USER_ID_CLAIM)) != str(user.pk):
         raise invalid
     with transaction.atomic():
-        token.blacklist()
+        if not sessions.end(user, token, SessionEndReason.LOGOUT):
+            raise invalid
         record(AuditAction.LOGOUT, actor=user, organization=user.organization)
 
 
 def logout_everywhere(user: User) -> None:
     with transaction.atomic():
-        revoke_all_tokens(user)
+        revoke_all_tokens(user, SessionEndReason.LOGOUT_ALL)
         record(AuditAction.LOGOUT_ALL, actor=user, organization=user.organization)
 
 
@@ -108,7 +117,7 @@ def change_password(user: User, *, current_password: str, new_password: str) -> 
     with transaction.atomic():
         user.set_password(new_password)
         user.save(update_fields=["password", "updated_at"])
-        revoke_all_tokens(user)
+        revoke_all_tokens(user, SessionEndReason.PASSWORD_CHANGED)
         record(
             AuditAction.PASSWORD_CHANGED, actor=user, organization=user.organization, target=user
         )
@@ -133,7 +142,7 @@ def update_profile(user: User, *, changes: dict[str, Any]) -> User:
 
 
 # ---------------------------------------------------------------- user administration
-def _check_can_administer(actor: User, target: User) -> None:
+def check_can_administer(actor: User, target: User) -> None:
     require_permission(actor, Perm.USER_MANAGE)
     require_same_tenant(actor, target)
     if target.is_super_admin:
@@ -165,7 +174,7 @@ def _ensure_another_active_admin(target: User) -> None:
 
 
 def change_role(*, actor: User, target: User, new_role: str) -> User:
-    _check_can_administer(actor, target)
+    check_can_administer(actor, target)
     if new_role not in ASSIGNABLE_ROLES:
         raise ValidationError({"role": [f'"{new_role}" is not an assignable role.']})
     with transaction.atomic():
@@ -188,7 +197,7 @@ def change_role(*, actor: User, target: User, new_role: str) -> User:
 
 
 def deactivate_user(*, actor: User, target: User) -> User:
-    _check_can_administer(actor, target)
+    check_can_administer(actor, target)
     with transaction.atomic():
         target = _lock(target)
         if not target.is_active:
@@ -198,7 +207,7 @@ def deactivate_user(*, actor: User, target: User) -> User:
         target.is_active = False
         target.deactivated_at = timezone.now()
         target.save(update_fields=["is_active", "deactivated_at", "updated_at"])
-        revoke_all_tokens(target)
+        revoke_all_tokens(target, SessionEndReason.USER_DEACTIVATED)
         record(
             AuditAction.USER_DEACTIVATED,
             actor=actor,
@@ -208,8 +217,22 @@ def deactivate_user(*, actor: User, target: User) -> User:
     return target
 
 
+def sign_out_everywhere(*, actor: User, target: User) -> None:
+    """An admin ends every session of a member (the account stays active)."""
+    check_can_administer(actor, target)
+    with transaction.atomic():
+        target = _lock(target)
+        revoke_all_tokens(target, SessionEndReason.REVOKED)
+        record(
+            AuditAction.USER_SESSIONS_REVOKED,
+            actor=actor,
+            organization=target.organization,
+            target=target,
+        )
+
+
 def reactivate_user(*, actor: User, target: User) -> User:
-    _check_can_administer(actor, target)
+    check_can_administer(actor, target)
     with transaction.atomic():
         target = _lock(target)
         if target.is_active:
@@ -280,25 +303,41 @@ def create_invitation(
             target=invitation,
             metadata={"email": email, "role": role},
         )
-        transaction.on_commit(lambda: _send_invitation_email(invitation, raw_token))
+        queue_invitation_email(invitation, raw_token)
     return invitation, raw_token
 
 
-def _send_invitation_email(invitation: Invitation, raw_token: str) -> None:
-    try:
-        send_mail(
-            subject=f"You have been invited to {invitation.organization.name}",
-            message=(
-                f"You have been invited to join {invitation.organization.name} as "
-                f"{invitation.get_role_display()}.\n\n"
-                f"Accept the invitation: {build_accept_url(raw_token)}\n\n"
-                f"This link expires at {invitation.expires_at:%Y-%m-%d %H:%M} UTC."
-            ),
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[invitation.email],
+def queue_invitation_email(invitation: Invitation, raw_token: str) -> None:
+    """Queue the email in the current transaction (ADR 0007), in the invitation's tenant.
+
+    The task's argument is the token encrypted, never the token itself.
+    """
+    from apps.accounts.tasks import send_invitation_email  # noqa: PLC0415 - import cycle
+
+    with rls.tenant_scope(invitation.organization_id):
+        send_invitation_email.enqueue(str(invitation.pk), crypto.encrypt(raw_token))
+
+
+def resend_invitation(*, actor: User, invitation: Invitation) -> tuple[Invitation, str]:
+    """A new token (the old link stops working) and a new email."""
+    require_permission(actor, Perm.INVITATION_MANAGE)
+    require_same_tenant(actor, invitation)
+    with transaction.atomic():
+        invitation = Invitation.objects.select_for_update().get(pk=invitation.pk)
+        if invitation.status != InvitationStatus.PENDING:
+            raise ValidationError({"detail": "Only pending invitations can be resent."})
+        raw_token = secrets.token_urlsafe(32)
+        invitation.token_hash = hash_invitation_token(raw_token)
+        invitation.email_status, invitation.email_last_error = EmailStatus.QUEUED, ""
+        invitation.save(update_fields=["token_hash", "email_status", "email_last_error"])
+        record(
+            AuditAction.INVITATION_RESENT,
+            actor=actor,
+            organization=invitation.organization,
+            target=invitation,
         )
-    except Exception:  # the invitation is still valid; the admin can share the link
-        logger.exception("Failed to send invitation email", extra={"invitation": invitation.pk})
+        queue_invitation_email(invitation, raw_token)
+    return invitation, raw_token
 
 
 def revoke_invitation(*, actor: User, invitation: Invitation) -> Invitation:
@@ -321,11 +360,20 @@ def revoke_invitation(*, actor: User, invitation: Invitation) -> Invitation:
 
 def accept_invitation(*, raw_token: str, password: str, full_name: str = "") -> User:
     invalid = ValidationError({"token": [INVALID_INVITATION]})
+    token_hash = hash_invitation_token(raw_token)
+    # Public endpoint: work in the invitation's tenant (nothing, for a bad token).
+    with rls.scope(scope_for_invitation(token_hash)):
+        return _accept_invitation(token_hash, password, full_name, invalid)
+
+
+def _accept_invitation(
+    token_hash: str, password: str, full_name: str, invalid: ValidationError
+) -> User:
     with transaction.atomic():
         invitation = (
             Invitation.objects.select_for_update(of=("self",))
             .select_related("organization")
-            .filter(token_hash=hash_invitation_token(raw_token))
+            .filter(token_hash=token_hash)
             .first()
         )
         if (

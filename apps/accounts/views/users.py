@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import django_filters
 from drf_spectacular.utils import extend_schema, extend_schema_view
-from rest_framework import mixins
+from rest_framework import mixins, status
 from rest_framework.decorators import action
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from apps.accounts import services
 from apps.accounts.models import User
-from apps.accounts.roles import Perm, Role
+from apps.accounts.roles import ApiScope, Perm, Role
 from apps.accounts.serializers.users import UserRoleUpdateSerializer, UserSerializer
 from apps.common.views import TenantScopedViewSet
+from apps.mfa import services as mfa
 
 
 class UserFilter(django_filters.FilterSet):
@@ -48,7 +49,10 @@ class UserViewSet(
         "partial_update": Perm.USER_MANAGE,
         "deactivate": Perm.USER_MANAGE,
         "reactivate": Perm.USER_MANAGE,
+        "reset_mfa": Perm.USER_MANAGE,
+        "revoke_sessions": Perm.USER_MANAGE,
     }
+    api_key_scopes = {"list": ApiScope.USERS_READ, "retrieve": ApiScope.USERS_READ}
 
     @extend_schema(
         summary="Change a user's role",
@@ -79,6 +83,34 @@ class UserViewSet(
     def deactivate(self, request: Request, pk: str | None = None) -> Response:
         user = services.deactivate_user(actor=self.actor, target=self.get_object())
         return Response(UserSerializer(user).data)
+
+    @extend_schema(
+        summary="Reset a user's second factors",
+        description=(
+            "For a member who lost their authenticator: removes their authenticator app, "
+            "security keys and recovery codes, and ends their sessions. Audited."
+        ),
+        request=None,
+        responses={204: None},
+    )
+    @action(detail=True, methods=["post"], url_path="reset-mfa")
+    def reset_mfa(self, request: Request, pk: str | None = None) -> Response:
+        mfa.reset(actor=self.actor, target=self.get_object())
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @extend_schema(
+        summary="Sign a user out everywhere",
+        description=(
+            "For incident response: ends every session of the member and revokes their "
+            "access tokens at once, without deactivating the account. Audited."
+        ),
+        request=None,
+        responses={204: None},
+    )
+    @action(detail=True, methods=["post"], url_path="revoke-sessions")
+    def revoke_sessions(self, request: Request, pk: str | None = None) -> Response:
+        services.sign_out_everywhere(actor=self.actor, target=self.get_object())
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @extend_schema(summary="Reactivate a user", request=None, responses=UserSerializer)
     @action(detail=True, methods=["post"])

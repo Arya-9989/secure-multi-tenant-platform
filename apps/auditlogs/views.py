@@ -5,7 +5,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework import mixins, serializers
 
-from apps.accounts.roles import Perm
+from apps.accounts.roles import ApiScope, Perm
 from apps.auditlogs.models import AuditAction, AuditLog
 from apps.common.pagination import CreatedAtCursorPagination
 from apps.common.views import TenantScopedViewSet
@@ -69,3 +69,4 @@ class AuditLogViewSet(
     filter_backends = (DjangoFilterBackend,)
     filterset_class = AuditLogFilter
     required_permissions = {"list": Perm.AUDIT_VIEW, "retrieve": Perm.AUDIT_VIEW}
+    api_key_scopes = {"list": ApiScope.AUDIT_READ, "retrieve": ApiScope.AUDIT_READ}

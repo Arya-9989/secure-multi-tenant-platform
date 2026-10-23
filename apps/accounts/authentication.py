@@ -1,23 +1,29 @@
 """JWT authentication hardened for multi-tenancy.
 
-On top of SimpleJWT's signature/expiry/blacklist checks, every request
-re-validates against the database:
+On top of SimpleJWT's signature and expiry checks, every request re-validates
+against the database, in the same single query that loads the user:
 
 * the user still exists and is active (soft deactivation is immediate),
 * the user's organization is still active,
 * the token's ``ver`` claim matches ``User.token_version`` - bumping the
   version (logout-all, password change, deactivation) revokes every access
-  *and* refresh token issued before, without waiting for expiry.
+  *and* refresh token issued before, without waiting for expiry,
+* the token's session (``fam``, a refresh-token family, ADR 0002) is still live,
+  so logging out or a detected refresh-token replay ends it at once.
 
 Authorization never trusts claims for role or tenant: those are read from
-the database row on each request.
+the database row on each request. Once the user is loaded, the request continues
+in their row-level-security scope (ADR 0001).
 """
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from django.core.exceptions import ValidationError
+from django.db.models import Exists, OuterRef
+from django.db.models.functions import Now
 from django.utils.translation import gettext_lazy as _
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.authentication import JWTAuthentication
@@ -25,9 +31,13 @@ from rest_framework_simplejwt.exceptions import InvalidToken
 from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.tokens import RefreshToken, Token
 
-from apps.accounts.models import User
+from apps.accounts.models import RefreshTokenFamily, User
+from apps.accounts.scopes import scope_for_account
+from apps.common import rls
 
 TOKEN_VERSION_CLAIM = "ver"  # noqa: S105 - a claim name, not a secret
+FAMILY_CLAIM = "fam"
+GENERATION_CLAIM = "gen"
 
 
 def user_can_authenticate(user: Any) -> bool:
@@ -41,6 +51,14 @@ def user_can_authenticate(user: Any) -> bool:
 
 def token_matches_user(token: Token | dict[str, Any], user: User) -> bool:
     return token.get(TOKEN_VERSION_CLAIM) == user.token_version
+
+
+def family_id_of(token: Token | dict[str, Any]) -> uuid.UUID | None:
+    """The session a validated token belongs to, or ``None`` if it names none."""
+    try:
+        return uuid.UUID(str(token.get(FAMILY_CLAIM)))
+    except ValueError:
+        return None
 
 
 class TenantRefreshToken(RefreshToken):
@@ -58,12 +76,25 @@ class TenantJWTAuthentication(JWTAuthentication):
         user_id = validated_token.get(api_settings.USER_ID_CLAIM)
         if user_id is None:
             raise InvalidToken("Token contained no recognizable user identification")
+        family_id = family_id_of(validated_token)
+        if family_id is None:
+            raise AuthenticationFailed(_("Token has been revoked"), code="token_revoked")
+        scope = scope_for_account(user_id=user_id)
+        live_session = RefreshTokenFamily.objects.filter(
+            pk=family_id, user=OuterRef("pk"), revoked_at__isnull=True, expires_at__gt=Now()
+        )
         try:
-            user: User = User.objects.select_related("organization").get(pk=user_id)
+            with rls.scope(scope):
+                user: User = (
+                    User.objects.select_related("organization")
+                    .annotate(session_is_live=Exists(live_session))
+                    .get(pk=user_id)
+                )
         except (User.DoesNotExist, ValidationError) as exc:
             raise AuthenticationFailed(_("User not found"), code="user_not_found") from exc
         if not user_can_authenticate(user):
             raise AuthenticationFailed(_("User is inactive"), code="user_inactive")
-        if not token_matches_user(validated_token, user):
+        if not token_matches_user(validated_token, user) or not user.session_is_live:  # type: ignore[attr-defined]
             raise AuthenticationFailed(_("Token has been revoked"), code="token_revoked")
+        rls.bind(scope)
         return user

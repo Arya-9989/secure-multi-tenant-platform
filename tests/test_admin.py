@@ -17,8 +17,8 @@ from django.http import HttpRequest
 from django.test import Client
 from django.urls import reverse
 from rest_framework.test import APIClient
-from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 
+from apps.accounts.models import RefreshTokenFamily
 from apps.auditlogs.models import AuditAction, AuditLog
 from apps.organizations.models import Organization
 from tests.conftest import PASSWORD, World
@@ -55,8 +55,8 @@ def operator(world: World, client: Client) -> Client:
 # ---------------------------------------------------------------- sign-in
 def test_admin_login_is_throttled_like_the_api(world: World, client: Client) -> None:
     url = reverse("admin:login")
-    for _ in range(_auth_limit()):
-        response = client.post(url, {"username": "root@platform.test", "password": "wrong"})
+    for attempt in range(_auth_limit()):
+        response = client.post(url, {"username": f"probe{attempt}@x.test", "password": "wrong"})
         assert response.status_code == 200  # the form, redisplayed with an error
 
     response = client.post(url, {"username": "root@platform.test", "password": PASSWORD})
@@ -126,40 +126,45 @@ def test_admin_password_change_revokes_api_sessions_and_is_audited(
 
 
 # ---------------------------------------------------------------- credentials
-def test_admin_never_shows_raw_refresh_tokens(world: World, operator: Client) -> None:
-    """Rotated refresh tokens are stored verbatim; the admin must not display them."""
+def test_admin_never_shows_tokens_or_the_redeemable_token_id(
+    world: World, operator: Client
+) -> None:
     first = _api_session("member@a.test")["refresh"]
-    rotated = APIClient().post("/api/v1/auth/refresh/", {"refresh": first})
-    refresh = rotated.json()["refresh"]
-    live = OutstandingToken.objects.get(token=refresh)
-    blacklisted = BlacklistedToken.objects.get(token__user=world.member_a)
-    outstanding = live
+    refresh = APIClient().post("/api/v1/auth/refresh/", {"refresh": first}).json()["refresh"]
+    session = RefreshTokenFamily.objects.get(user=world.member_a)
 
     pages = [
-        reverse("admin:token_blacklist_outstandingtoken_changelist"),
-        reverse("admin:token_blacklist_outstandingtoken_change", args=[outstanding.pk]),
-        reverse("admin:token_blacklist_blacklistedtoken_changelist"),
-        reverse("admin:token_blacklist_blacklistedtoken_change", args=[blacklisted.pk]),
+        reverse("admin:accounts_refreshtokenfamily_changelist"),
+        reverse("admin:accounts_refreshtokenfamily_change", args=[session.pk]),
     ]
     for page in pages:
         response = operator.get(page)
         assert response.status_code == 200, page
         html = response.content.decode()
-        assert refresh not in html, page
-        assert refresh.split(".")[1] not in html, f"{page} shows the token payload"
+        for secret in (refresh, first, refresh.split(".")[1], session.current_jti):
+            assert secret not in html, page
 
 
-def test_admin_cannot_unrevoke_a_token(world: World, operator: Client) -> None:
-    _api_session("member@a.test")
-    blacklisted = BlacklistedToken.objects.create(
-        token=OutstandingToken.objects.get(user=world.member_a)
-    )
-    delete = reverse("admin:token_blacklist_blacklistedtoken_delete", args=[blacklisted.pk])
+def test_admin_cannot_revive_or_delete_a_session(world: World, operator: Client) -> None:
+    tokens = _api_session("member@a.test")
+    api = APIClient()
+    api.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+    assert api.post("/api/v1/auth/logout/", {"refresh": tokens["refresh"]}).status_code == 204
+    session = RefreshTokenFamily.objects.get(user=world.member_a)
+
+    change = reverse("admin:accounts_refreshtokenfamily_change", args=[session.pk])
+    operator.post(change, {"revoked_at": "", "revoked_reason": ""})
+    delete = reverse("admin:accounts_refreshtokenfamily_delete", args=[session.pk])
     assert operator.get(delete).status_code == 403
     operator.post(delete, {"post": "yes"})
-    changelist = reverse("admin:token_blacklist_blacklistedtoken_changelist")
-    operator.post(changelist, {"action": "delete_selected", "_selected_action": [blacklisted.pk]})
-    assert BlacklistedToken.objects.filter(pk=blacklisted.pk).exists()
+    changelist = reverse("admin:accounts_refreshtokenfamily_changelist")
+    operator.post(changelist, {"action": "delete_selected", "_selected_action": [session.pk]})
+
+    session.refresh_from_db()
+    assert session.revoked_at is not None
+    assert (
+        APIClient().post("/api/v1/auth/refresh/", {"refresh": tokens["refresh"]}).status_code == 401
+    )
 
 
 # ---------------------------------------------------------------- tenants

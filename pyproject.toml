@@ -18,6 +18,14 @@ dependencies = [
     "whitenoise>=6.9",
     "redis>=5.2",
     "django-stubs-ext>=6.0,<6.1",
+    "webauthn>=2.5",
+    "cryptography>=46",
+    "opentelemetry-api>=1.30",
+    "opentelemetry-sdk>=1.30",
+    "opentelemetry-exporter-otlp-proto-http>=1.30",
+    "opentelemetry-instrumentation-psycopg>=0.51b0",
+    "opentelemetry-instrumentation-redis>=0.51b0",
+    "opentelemetry-instrumentation-urllib>=0.51b0",
 ]
 
 [dependency-groups]
@@ -76,7 +84,7 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 # drf-spectacular's extension base classes are untyped.
-module = ["apps.accounts.schema", "apps.common.schema"]
+module = ["apps.accounts.schema", "apps.apikeys.schema", "apps.common.schema"]
 disallow_untyped_calls = false
 
 [[tool.mypy.overrides]]

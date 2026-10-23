@@ -9,7 +9,6 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken
 
-from apps.accounts.authentication import TenantRefreshToken
 from apps.accounts.models import User
 from apps.auditlogs.models import AuditAction, AuditLog
 from tests.conftest import PASSWORD, ClientFactory, World, forge_token, token_claims
@@ -85,16 +84,15 @@ def test_users_of_a_deactivated_organization_cannot_log_in(
     assert login(api_client, "admin@b.test").status_code == 200
 
 
-def test_refresh_rotates_and_blacklists_the_old_token(world: World, api_client: APIClient) -> None:
+def test_refresh_rotates_the_token_pair(world: World, api_client: APIClient) -> None:
     first = login(api_client, "member@a.test").json()
     rotated = api_client.post(REFRESH, {"refresh": first["refresh"]})
     assert rotated.status_code == 200
     assert set(rotated.json()) == {"access", "refresh"}
     assert rotated.json()["refresh"] != first["refresh"]
-
-    replay = api_client.post(REFRESH, {"refresh": first["refresh"]})
-    assert replay.status_code == 401
-    assert api_client.post(REFRESH, {"refresh": rotated.json()["refresh"]}).status_code == 200
+    again = api_client.post(REFRESH, {"refresh": rotated.json()["refresh"]})
+    assert again.status_code == 200
+    # Replaying a rotated token is reuse: covered in test_sessions.py.
 
 
 def test_access_token_cannot_be_used_as_refresh(world: World, api_client: APIClient) -> None:
@@ -102,13 +100,19 @@ def test_access_token_cannot_be_used_as_refresh(world: World, api_client: APICli
     assert api_client.post(REFRESH, {"refresh": tokens["access"]}).status_code == 401
 
 
-def test_logout_blacklists_refresh_token(world: World, api_client: APIClient) -> None:
+def test_logout_ends_the_session_and_its_access_token(world: World, api_client: APIClient) -> None:
     tokens = login(api_client, "member@a.test").json()
+    other = login(api_client, "member@a.test").json()
     client = authed(tokens["access"])
     assert client.post("/api/v1/auth/logout/", {"refresh": tokens["refresh"]}).status_code == 204
     assert api_client.post(REFRESH, {"refresh": tokens["refresh"]}).status_code == 401
-    assert client.post("/api/v1/auth/logout/", {"refresh": tokens["refresh"]}).status_code == 400
+    # No five-minute window: the session's access token stops working at once.
+    assert client.get("/api/v1/auth/me/").status_code == 401
     assert AuditLog.objects.filter(action=AuditAction.LOGOUT, actor=world.member_a).exists()
+    # Other sessions are untouched, and an ended session cannot be ended again.
+    second = authed(other["access"])
+    assert second.get("/api/v1/auth/me/").status_code == 200
+    assert second.post("/api/v1/auth/logout/", {"refresh": tokens["refresh"]}).status_code == 400
 
 
 def test_cannot_log_out_someone_else(world: World, api_client: APIClient) -> None:
@@ -185,9 +189,10 @@ def _auth_limit() -> int:
 
 
 def test_login_is_throttled(world: World, api_client: APIClient) -> None:
+    """Per client, across accounts (the per-account limit is in test_login_throttling.py)."""
     limit = _auth_limit()
-    for _ in range(limit):
-        assert login(api_client, "member@a.test", "wrong").status_code == 401
+    for attempt in range(limit):
+        assert login(api_client, f"probe{attempt}@a.test", "wrong").status_code == 401
     response = login(api_client, "member@a.test")  # even correct credentials
     assert response.status_code == 429
     assert "Retry-After" in response.headers
@@ -203,7 +208,7 @@ def test_login_throttle_ignores_a_spoofed_forwarded_for(
     limit = _auth_limit()
     for attempt in range(limit):
         spoofed = {"HTTP_X_FORWARDED_FOR": f"203.0.113.{attempt}"}
-        assert login(api_client, "member@a.test", "wrong", **spoofed).status_code == 401
+        assert login(api_client, f"probe{attempt}@a.test", "wrong", **spoofed).status_code == 401
     response = login(api_client, "member@a.test", HTTP_X_FORWARDED_FOR="198.51.100.250")
     assert response.status_code == 429
 
@@ -216,26 +221,13 @@ def test_behind_a_trusted_proxy_the_throttle_keys_on_the_address_it_appended(
     for attempt in range(limit):
         # The client controls everything left of the address our proxy appended.
         chain = {"HTTP_X_FORWARDED_FOR": f"203.0.113.{attempt}, 198.51.100.7"}
-        assert login(api_client, "member@a.test", "wrong", **chain).status_code == 401
+        assert login(api_client, f"probe{attempt}@a.test", "wrong", **chain).status_code == 401
     attacker = {"HTTP_X_FORWARDED_FOR": "203.0.113.99, 198.51.100.7"}
     assert login(api_client, "member@a.test", **attacker).status_code == 429
     # A different client behind the same proxy has its own budget.
     other = {"HTTP_X_FORWARDED_FOR": "198.51.100.8"}
     assert login(api_client, "member@a.test", **other).status_code == 200
     assert AuditLog.objects.filter(ip_address="198.51.100.8").exists()
-
-
-def test_a_refresh_token_is_redeemed_once_even_when_requests_race(
-    world: World, api_client: APIClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Two concurrent refreshes can both pass the blacklist read before either
-    writes. The claim itself must be atomic, so only one of them wins."""
-    tokens = login(api_client, "member@a.test").json()
-    monkeypatch.setattr(TenantRefreshToken, "check_blacklist", lambda self: None)
-
-    assert api_client.post(REFRESH, {"refresh": tokens["refresh"]}).status_code == 200
-    replay = api_client.post(REFRESH, {"refresh": tokens["refresh"]})
-    assert replay.status_code == 401
 
 
 # ---------------------------------------------------------------- profile & password

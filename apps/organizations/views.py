@@ -6,7 +6,7 @@ from rest_framework import mixins, status
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from apps.accounts.roles import Perm
+from apps.accounts.roles import ApiScope, Perm
 from apps.common.views import TenantScopedViewSet
 from apps.organizations import services
 from apps.organizations.models import Organization
@@ -38,6 +38,7 @@ class OrganizationViewSet(
         "create": Perm.ORGANIZATION_MANAGE,
         "partial_update": Perm.ORGANIZATION_MANAGE,
     }
+    api_key_scopes = {"list": ApiScope.ORGANIZATION_READ, "retrieve": ApiScope.ORGANIZATION_READ}
 
     @extend_schema(summary="Create an organization (super admin)")
     def create(self, request: Request) -> Response:

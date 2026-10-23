@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Any, ClassVar, Self, TypeVar
 from django.db import models
 from rest_framework import serializers
 
+from apps.common.principals import ServicePrincipal
+
 if TYPE_CHECKING:
     from apps.accounts.models import User
 
@@ -29,6 +31,13 @@ def resolve_user(candidate: object) -> User | None:
     return None
 
 
+def resolve_principal(candidate: object) -> User | ServicePrincipal | None:
+    """A person (as :func:`resolve_user`) or a service holding an API key (ADR 0005)."""
+    if isinstance(candidate, ServicePrincipal):
+        return candidate
+    return resolve_user(candidate)
+
+
 class TenantQuerySet(models.QuerySet[_M]):
     """QuerySet for rows owned by an organization.
 
@@ -39,14 +48,14 @@ class TenantQuerySet(models.QuerySet[_M]):
     tenant_field: ClassVar[str] = "organization"
 
     def visible_to(self, candidate: object) -> Self:
-        user = resolve_user(candidate)
-        if user is None:
+        principal = resolve_principal(candidate)
+        if principal is None:
             return self.none()
-        if user.is_super_admin:
+        if principal.is_super_admin:
             return self.all()
-        if user.organization_id is None:
+        if principal.organization_id is None:
             return self.none()
-        return self.filter(**{self.tenant_field: user.organization_id})
+        return self.filter(**{self.tenant_field: principal.organization_id})
 
 
 def tenant_id_of(obj: Any) -> Any:
