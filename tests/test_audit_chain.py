@@ -482,6 +482,22 @@ def test_a_failing_siem_is_retried_and_nothing_is_skipped(
     assert AuditExportCursor.objects.get(chain=str(world.org_a.pk)).last_seq == 1, "not advanced"
 
 
+def test_the_heartbeat_is_touched_only_when_the_siem_accepts(
+    world: World, siem_server: type[_Siem], tmp_path: Any
+) -> None:
+    heartbeat = tmp_path / "shipper-heartbeat"
+    siem_server.failures_left = 99
+    record(AuditAction.LOGOUT, organization=world.org_a)
+    with pytest.raises(CommandError):
+        call_command(
+            "stream_audit_log", "--once", "--heartbeat", str(heartbeat), stdout=io.StringIO()
+        )
+    assert not heartbeat.exists(), "a SIEM that refuses everything must read as unhealthy"
+    siem_server.failures_left = 0
+    call_command("stream_audit_log", "--once", "--heartbeat", str(heartbeat), stdout=io.StringIO())
+    assert heartbeat.exists()
+
+
 def test_streaming_needs_a_destination(world: World) -> None:
     with pytest.raises(CommandError, match="AUDIT_SIEM_URL"):
         call_command("stream_audit_log", "--once")

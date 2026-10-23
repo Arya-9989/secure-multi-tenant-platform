@@ -6,6 +6,7 @@ import secrets
 import signal
 import socket
 import threading
+from pathlib import Path
 from typing import Any
 
 from django.core.management.base import BaseCommand, CommandParser
@@ -21,6 +22,11 @@ class Command(BaseCommand):
         parser.add_argument("--interval", type=float, default=1.0, help="Idle poll interval.")
         parser.add_argument("--batch", type=int, default=10, help="Tasks claimed at a time.")
         parser.add_argument("--once", action="store_true", help="Run what is ready, then exit.")
+        parser.add_argument(
+            "--heartbeat",
+            type=Path,
+            help="File touched after every poll that reached the database (for health checks).",
+        )
 
     def handle(self, *args: Any, **options: Any) -> None:
         worker_id = f"{socket.gethostname()}:{secrets.token_hex(4)}"
@@ -33,6 +39,8 @@ class Command(BaseCommand):
             statuses = worker.run_once(
                 worker_id=worker_id, queue=options["queue"], limit=options["batch"]
             )
+            if options["heartbeat"]:
+                options["heartbeat"].touch()
             if statuses:
                 self.stdout.write(f"Ran {len(statuses)} task(s): {', '.join(statuses)}")
             if options["once"]:

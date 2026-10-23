@@ -71,12 +71,12 @@ TEST_SUITE: Final[tuple[SuiteFile, ...]] = (
     ),
     SuiteFile(
         "test_tasks.py",
-        23,
+        24,
         "The task queue and invitation email: outbox, scopes, retries, leases, idempotency",
     ),
     SuiteFile(
         "test_audit_chain.py",
-        22,
+        23,
         "Hash chains catch edits, deletions and reorders; partitions, retention, SIEM",
     ),
     SuiteFile(

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import signal
 import threading
+from pathlib import Path
 from typing import Any
 
 from django.core.management.base import BaseCommand, CommandError, CommandParser
@@ -22,6 +23,11 @@ class Command(BaseCommand):
     def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument("--once", action="store_true", help="Ship what is pending, then exit.")
         parser.add_argument("--interval", type=float, default=5.0, help="Seconds between polls.")
+        parser.add_argument(
+            "--heartbeat",
+            type=Path,
+            help="File touched after every poll the SIEM accepted (container health check).",
+        )
 
     def handle(self, *args: Any, **options: Any) -> None:
         stop = threading.Event()
@@ -37,6 +43,8 @@ class Command(BaseCommand):
                     raise CommandError(str(exc)) from exc
                 self.stderr.write(f"{exc}; retrying in {options['interval']}s")
             else:
+                if options["heartbeat"]:
+                    options["heartbeat"].touch()
                 if result.events or options["once"]:
                     self.stdout.write(
                         f"Shipped {result.events} event(s) in {result.batches} batch(es)."

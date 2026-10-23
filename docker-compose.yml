@@ -90,12 +90,17 @@ services:
 
   worker:
     build: .
-    command: ["python", "manage.py", "run_worker"]
+    command: ["python", "manage.py", "run_worker", "--heartbeat", "/tmp/worker-heartbeat"]
     environment:
       <<: *app-env
       OTEL_SERVICE_NAME: platform-worker
     healthcheck:
-      disable: true  # a worker, not a web server: the image's HTTP check does not apply
+      # Not the image's HTTP check: healthy while the poll loop keeps reaching the database.
+      test: ["CMD", "python", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/worker-heartbeat') > 60)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -185,9 +190,14 @@ services:
   audit-shipper:
     build: .
     profiles: ["siem"]
-    command: ["python", "manage.py", "stream_audit_log", "--interval", "5"]
+    command: ["python", "manage.py", "stream_audit_log", "--interval", "5", "--heartbeat", "/tmp/shipper-heartbeat"]
     healthcheck:
-      disable: true  # a worker, not a web server: the image's HTTP check does not apply
+      # Not the image's HTTP check: healthy while the SIEM keeps accepting the stream.
+      test: ["CMD", "python", "-c", "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/shipper-heartbeat') > 60)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     environment:
       <<: *app-env
       AUDIT_SIEM_URL: http://vector:9000/audit

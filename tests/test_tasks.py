@@ -202,6 +202,12 @@ def test_the_worker_and_prune_commands() -> None:
         call_command("prune_tasks", "--days", "-1")
 
 
+def test_the_worker_touches_its_heartbeat_after_each_poll(tmp_path: Any) -> None:
+    heartbeat = tmp_path / "worker-heartbeat"
+    call_command("run_worker", "--once", "--heartbeat", str(heartbeat), stdout=io.StringIO())
+    assert heartbeat.exists(), "an idle poll still proves the worker reached the database"
+
+
 # ---------------------------------------------------------------- invitation email
 def invite(world: World, client_for: ClientFactory, email: str = "carol@a.test") -> Any:
     response = client_for(world.admin_a).post(

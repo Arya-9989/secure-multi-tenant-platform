@@ -1,6 +1,6 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/hero-dark.svg">
-  <img alt="Secure Multi-Tenant Platform. Every tenant, sealed: Alice from Acme asks for a Globex user and gets 404, the same as a random ID. Fail-closed tenant isolation for Django REST Framework, proven by 661 tests." src="docs/hero-light.svg" width="100%">
+  <img alt="Secure Multi-Tenant Platform. Every tenant, sealed: Alice from Acme asks for a Globex user and gets 404, the same as a random ID. Fail-closed tenant isolation for Django REST Framework, proven by 663 tests." src="docs/hero-light.svg" width="100%">
 </picture>
 
 # Secure Multi-Tenant Platform
@@ -625,7 +625,7 @@ CREATE DATABASE app OWNER app_owner;
 (Connecting as a superuser also works: the suite creates `app_runtime` itself. The owner's
 `FORCE` test is then skipped, because superusers bypass RLS.)
 
-The suite has 661 tests and 97% branch coverage (the gate is 90%). It runs against
+The suite has 663 tests and 97% branch coverage (the gate is 90%). It runs against
 PostgreSQL in CI; on SQLite, 594 pass and the 67 that need PostgreSQL (row-level security,
 partitions, concurrency) are skipped.
 
