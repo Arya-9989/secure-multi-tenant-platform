@@ -1,6 +1,6 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/hero-dark.svg">
-  <img alt="Secure Multi-Tenant Platform. Every tenant, sealed: Alice from Acme asks for a Globex user and gets 404, the same as a random ID. Fail-closed tenant isolation for Django REST Framework, proven by 281 tests." src="docs/hero-light.svg" width="100%">
+  <img alt="Secure Multi-Tenant Platform. Every tenant, sealed: Alice from Acme asks for a Globex user and gets 404, the same as a random ID. Fail-closed tenant isolation for Django REST Framework, proven by 661 tests." src="docs/hero-light.svg" width="100%">
 </picture>
 
 # Secure Multi-Tenant Platform
@@ -9,14 +9,17 @@
 &nbsp;Python 3.12 · Django 6.0 · Django REST Framework · PostgreSQL 17 · [MIT](LICENSE)
 
 A multi-tenant SaaS backend in Django REST Framework where **tenant isolation is enforced
-centrally and then proven by tests**. Every tenant-scoped endpoint is attacked by a
-parametrized suite (IDOR, cross-tenant writes, foreign-key references, privilege escalation,
-forged tokens), and a structural test fails the build if someone adds a route without
-covering it.
+twice, in the application and by PostgreSQL row-level security, and then proven by tests**.
+Every tenant-scoped endpoint is attacked by a parametrized suite (IDOR, cross-tenant writes,
+foreign-key references, privilege escalation, forged tokens), a structural test fails the
+build if someone adds a route without covering it, and another fails it if a tenant table
+ships without row-level security.
 
-It includes three roles, token-based expiring invitations, soft deactivation, hardened JWT
-sessions (refresh-token families with reuse detection, instant revocation) and an append-only
-audit log that PostgreSQL itself refuses to modify.
+It includes three roles, invitations emailed by a background worker, MFA (TOTP and
+WebAuthn), SSO through each organization's OpenID Connect provider, scoped API keys for
+services, hardened JWT sessions (refresh-token families with reuse detection, instant
+revocation, per-account sign-in delays) and a hash-chained, append-only audit log that
+PostgreSQL refuses to modify and that streams to a SIEM, all traced with OpenTelemetry.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/swagger-cross-tenant-404-dark.png">
@@ -622,8 +625,9 @@ CREATE DATABASE app OWNER app_owner;
 (Connecting as a superuser also works: the suite creates `app_runtime` itself. The owner's
 `FORCE` test is then skipped, because superusers bypass RLS.)
 
-The suite has 281 tests and 97% branch coverage (the gate is 90%). It runs against
-PostgreSQL in CI.
+The suite has 661 tests and 97% branch coverage (the gate is 90%). It runs against
+PostgreSQL in CI; on SQLite, 594 pass and the 67 that need PostgreSQL (row-level security,
+partitions, concurrency) are skipped.
 
 | File | Focus |
 |---|---|
@@ -711,6 +715,20 @@ docker compose --profile sso run --rm sso-e2e
 ```
 
 ## Design decisions and trade-offs
+
+The larger decisions have their own records in [`docs/adr/`](docs/adr/): context, options
+considered, decision and consequences.
+
+| ADR | Decision |
+|---|---|
+| [0001](docs/adr/0001-postgres-row-level-security.md) | PostgreSQL row-level security as a second isolation layer |
+| [0002](docs/adr/0002-refresh-token-families.md) | Refresh-token families with reuse detection |
+| [0003](docs/adr/0003-per-account-login-throttling.md) | Per-account sign-in delays that resist lockout attacks |
+| [0004](docs/adr/0004-mfa-and-oidc-sso.md) | MFA (TOTP, WebAuthn) and OIDC SSO; SAML deferred |
+| [0005](docs/adr/0005-scoped-api-keys.md) | Scoped, read-only, tenant-bound API keys |
+| [0006](docs/adr/0006-audit-log-integrity-retention-siem.md) | Audit hash chains, monthly partitions, retention, SIEM streaming |
+| [0007](docs/adr/0007-async-invitation-email.md) | A transactional task queue on Django's task framework |
+| [0008](docs/adr/0008-opentelemetry-tracing.md) | OpenTelemetry tracing without personal data |
 
 **Shared schema vs schema-per-tenant vs database-per-tenant.** I chose a shared schema with
 an `organization` FK. It keeps migrations, connection pooling, cross-tenant operator queries
