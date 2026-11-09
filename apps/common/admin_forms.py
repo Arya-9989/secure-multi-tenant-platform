@@ -23,7 +23,7 @@ class MfaAdminAuthenticationForm(AdminAuthenticationForm):
         required=False,
         max_length=32,
         widget=forms.TextInput(
-            attrs={"autocomplete": "one-time-code", "inputmode": "numeric", "spellcheck": "false"}
+            attrs={"autocomplete": "one-time-code", "spellcheck": "false", "autocapitalize": "none"}
         ),
     )
 

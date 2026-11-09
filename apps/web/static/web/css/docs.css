@@ -5,7 +5,7 @@
    !important (except where Swagger itself uses it). */
 
 *, *::before, *::after { box-sizing: border-box; }
-html { overflow-y: scroll; }
+html { overflow-y: scroll; scroll-padding-top: 64px; }
 html, html.dark-mode { background: var(--bg); }
 body {
   margin: 0;

@@ -1,23 +1,21 @@
 {% extends "admin/login.html" %}
-{% load i18n %}
+{% load i18n static %}
 {% comment %}
-Django's sign-in form plus one row: the second factor (apps.common.admin_forms).
-Everything else is Django's own template, unchanged.
+Django's sign-in form with a second factor and a linked validation summary.
 {% endcomment %}
 
 {% block content %}
-{% if form.errors and not form.non_field_errors %}
-<p class="errornote">
-{% blocktranslate count counter=form.errors.items|length %}Please correct the error below.{% plural %}Please correct the errors below.{% endblocktranslate %}
-</p>
-{% endif %}
-
-{% if form.non_field_errors %}
-{% for error in form.non_field_errors %}
-<p class="errornote">
-    {{ error }}
-</p>
-{% endfor %}
+{% if form.errors %}
+<div class="errornote" id="login-errors" tabindex="-1" aria-labelledby="login-errors-title">
+  <h2 id="login-errors-title">{% translate "Please correct the following errors." %}</h2>
+  {{ form.non_field_errors }}
+  <ul>
+    {% for field in form %}{% for error in field.errors %}
+    <li><a href="#{{ field.id_for_label }}">{{ field.label }}: {{ error }}</a></li>
+    {% endfor %}{% endfor %}
+  </ul>
+</div>
+<script src="{% static 'web/js/login-errors.js' %}" defer></script>
 {% endif %}
 
 <div id="content-main">
