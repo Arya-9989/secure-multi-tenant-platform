@@ -36,6 +36,26 @@ ERROR_PAGE = "/no-such-page/"
 
 
 @pytest.mark.django_db
+def test_login_validation_keeps_inline_errors_and_links_the_summary(client: Client) -> None:
+    page = client.get("/admin/login/").content.decode()
+    assert 'id="login-errors"' not in page
+    assert 'src="/static/web/js/login-errors.js"' not in page
+
+    response = client.post("/admin/login/", {"username": "", "password": ""})
+    html = response.content.decode()
+    assert response.status_code == 200
+    assert 'id="login-errors" tabindex="-1" aria-labelledby="login-errors-title"' in html
+    for name in ("username", "password"):
+        assert f'href="#id_{name}"' in html
+        assert f'id="id_{name}_error"' in html
+    assert 'src="/static/web/js/login-errors.js"' in html
+    otp = re.search(r'<input[^>]+name="otp"[^>]*>', html)
+    assert otp
+    assert 'inputmode="numeric"' not in otp.group()
+    assert 'autocomplete="one-time-code"' in otp.group()
+
+
+@pytest.mark.django_db
 def test_landing_renders_facts_from_code_and_settings(api_client: APIClient) -> None:
     response = api_client.get("/")
     html = response.content.decode()
@@ -44,6 +64,7 @@ def test_landing_renders_facts_from_code_and_settings(api_client: APIClient) -> 
     assert response["Content-Type"].startswith("text/html")
     assert "Every tenant." in html
     assert "This server is ready" in html
+    assert 'data-status-label role="status"' in html
     # The role matrix is generated from ROLE_PERMISSIONS, cell for cell.
     granted = sum(len(perms) for perms in ROLE_PERMISSIONS.values())
     assert html.count(">Granted<") == granted

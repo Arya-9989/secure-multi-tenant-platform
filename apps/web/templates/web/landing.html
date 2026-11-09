@@ -62,7 +62,7 @@
         <a class="btn btn-secondary" href="#isolation">How isolation works</a>
       </div>
       <p class="status" data-status data-url="{% url 'health-ready' %}" data-ready="{{ status.ready|yesno:'true,false' }}">
-        <span class="status-head"><span class="status-dot is-fresh" aria-hidden="true"></span><span class="status-label" data-status-label>{% if status.ready %}This server is ready{% else %}This server is degraded{% endif %}</span></span>
+        <span class="status-head"><span class="status-dot is-fresh" aria-hidden="true"></span><span class="status-label" data-status-label role="status">{% if status.ready %}This server is ready{% else %}This server is degraded{% endif %}</span></span>
         <span class="status-details">
           <span>Database <span data-check="database">{{ status.checks.database }}</span></span>
           <span>Cache <span data-check="cache">{{ status.checks.cache }}</span></span>
